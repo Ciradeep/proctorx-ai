@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Guardian — Admin Command Center</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { inter: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+          colors: { crimson: { 400: '#f87171', 500: '#ef4444', 600: '#dc2626', 950: '#1a0000' } }
+        }
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    .blink { animation: blink 0.8s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0.2; } }
+    .card-enter { animation: cardEnter 0.3s ease forwards; }
+    @keyframes cardEnter { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    .alert-flash { animation: alertFlash 0.4s ease forwards; }
+    @keyframes alertFlash { 0%,100% { background: transparent; } 50% { background: rgba(220,38,38,0.15); } }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: #020409; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .stat-pulse { animation: statPulse 2s ease infinite; }
+    @keyframes statPulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
+    .mobile-feed { image-rendering: pixelated; }
+    .risk-bar { transition: width 0.5s ease; }
+    #modal-overlay { backdrop-filter: blur(4px); }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 font-inter text-sm antialiased">
+  <div class="h-screen flex flex-col overflow-hidden">
+
+    <!-- ═══════════════════════════════════════════════════ HEADER ═══ -->
+    <header class="border-b border-slate-800 bg-[#04060e] px-5 py-3 flex items-center justify-between shrink-0 z-20">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 bg-indigo-600 flex items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><rect x="3" y="11" width="18" height="11"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <div>
+          <h1 class="text-sm font-bold tracking-widest uppercase text-slate-100">Exam Guardian AI</h1>
+          <p class="text-[9px] text-slate-600 font-mono tracking-wider">COMMAND_CENTER // CS-401_FINAL</p>
+        </div>
+        <div class="w-px h-6 bg-slate-800 mx-2"></div>
+        <!-- Live Stats -->
+        <div class="flex items-center gap-4">
+          <div class="text-center">
+            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">ONLINE</div>
+            <div id="stat-online" class="text-sm font-bold font-mono text-emerald-400">0</div>
+          </div>
+          <div class="text-center">
+            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">HIGH RISK</div>
+            <div id="stat-highrisk" class="text-sm font-bold font-mono text-crimson-400">0</div>
+          </div>
+          <div class="text-center">
+            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">ALERTS</div>
+            <div id="stat-alerts" class="text-sm font-bold font-mono text-amber-400">0</div>
+          </div>
+          <div class="text-center">
+            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">TOTAL</div>
+            <div id="stat-total" class="text-sm font-bold font-mono text-slate-300">0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Pending Approvals -->
+        <div id="approvals-container" class="hidden flex items-center bg-amber-950/60 border border-amber-500/40 px-3 py-1.5 gap-3">
+          <div class="w-1.5 h-1.5 bg-amber-400 rounded-full blink"></div>
+          <span class="text-[9px] font-bold text-amber-500 uppercase tracking-widest">Pending Access</span>
+          <div id="approvals-list" class="flex gap-2"></div>
+        </div>
+
+        <!-- Search -->
+        <div class="relative">
+          <input id="search-input" type="text" placeholder="Search student..." class="bg-slate-900 border border-slate-800 text-slate-300 text-xs font-mono px-3 py-1.5 focus:outline-none focus:border-indigo-500 w-44 transition-colors" oninput="filterStudents(this.value)">
+        </div>
+
+        <!-- Export -->
+        <button onclick="exportReport()" class="text-[9px] font-mono tracking-widest bg-emerald-950/50 text-emerald-400 border border-emerald-700/50 hover:border-emerald-500 hover:bg-emerald-900/30 px-3 py-1.5 transition-colors uppercase">
+          ↓ Export Report
+        </button>
+
+        <div class="h-5 w-px bg-slate-800"></div>
+
+        <div class="flex items-center gap-3">
+          <div>
+            <div id="admin-name" class="text-xs font-semibold uppercase text-right">Admin</div>
+            <div class="text-[9px] text-slate-600 font-mono">SYS_NODE_01</div>
+          </div>
+          <button onclick="Auth.logout()" class="text-[9px] font-mono uppercase bg-slate-900 text-slate-500 hover:text-white px-2 py-1.5 border border-slate-800 hover:border-slate-600 transition-colors">Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════ MAIN ═══ -->
+    <main class="flex-1 flex overflow-hidden">
+
+      <!-- LEFT: MONITORING GRID -->
+      <section class="flex-1 flex flex-col overflow-hidden bg-slate-950">
+        <div class="px-4 py-2.5 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3">
+            <h2 class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Active Monitoring Grid</h2>
+            <div class="w-1.5 h-1.5 bg-emerald-500 rounded-full stat-pulse"></div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-[9px] font-mono text-slate-600" id="grid-sort-label">Sorted by: Risk ↓</span>
+            <button onclick="toggleSort()" class="text-[9px] font-mono text-slate-500 hover:text-slate-300 border border-slate-800 px-2 py-0.5 hover:border-slate-700 transition-colors">SORT</button>
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4">
+          <div id="student-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div class="col-span-full py-24 text-center text-slate-700 font-mono text-xs border border-slate-800 border-dashed" id="grid-empty">
+              <div class="text-2xl mb-3 opacity-30">⊡</div>
+              AWAITING WEBSOCKET CONNECTIONS...
+              <div class="text-[9px] mt-2 text-slate-800">Students will appear here when they join the exam</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: INTELLIGENCE PANEL -->
+      <section class="w-[380px] flex flex-col shrink-0 border-l border-slate-800 bg-[#04060e]">
+
+        <!-- Target Analysis Header -->
+        <div class="p-4 border-b border-slate-800 shrink-0 bg-black/30">
+          <div class="flex justify-between items-center mb-1">
+            <h2 class="text-[9px] font-bold tracking-widest text-slate-500 uppercase">Target Intel</h2>
+            <div id="target-id" class="text-[9px] font-mono text-indigo-400 bg-indigo-950/50 border border-indigo-800/50 px-2 py-0.5">NONE SELECTED</div>
+          </div>
+        </div>
+
+        <!-- Target Details -->
+        <div id="target-details" class="p-4 border-b border-slate-800 shrink-0">
+          <div class="flex flex-col items-center justify-center py-8 text-slate-700 border border-slate-800 border-dashed">
+            <div class="text-lg opacity-20 mb-2">◼</div>
+            <span class="text-[10px] font-mono uppercase tracking-wider">Select a student from the grid</span>
+          </div>
+        </div>
+
+        <!-- Risk Graph -->
+        <div class="border-b border-slate-800 p-3 shrink-0 bg-black/20">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="text-[9px] font-bold tracking-widest text-slate-600 uppercase">Risk Velocity</h2>
+            <span id="chart-target-label" class="text-[9px] font-mono text-slate-700">—</span>
+          </div>
+          <div class="h-24 relative">
+            <canvas id="riskChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Secondary Camera Feed -->
+        <div class="border-b border-slate-800 p-3 shrink-0 bg-black/20">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="text-[9px] font-bold tracking-widest text-slate-600 uppercase">2nd Camera (Mobile)</h2>
+            <div class="flex items-center gap-1.5">
+              <div id="mobile-led" class="w-1.5 h-1.5 rounded-full bg-slate-700"></div>
+              <span id="mobile-status-text" class="text-[9px] font-mono text-slate-700 uppercase">OFFLINE</span>
+            </div>
+          </div>
+          <div class="relative bg-black border border-slate-800 aspect-video flex items-center justify-center overflow-hidden">
+            <span id="cam2-placeholder" class="text-[9px] text-slate-700 font-mono uppercase tracking-widest">Awaiting Mobile Sync...</span>
+            <img id="mobile-cam-feed" class="mobile-feed w-full h-full object-cover absolute inset-0 hidden" src="" alt="Mobile feed">
+          </div>
+        </div>
+
+        <!-- Live Event Ledger -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+          <div class="px-3 py-2 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between shrink-0">
+            <h2 class="text-[9px] font-bold tracking-widest text-slate-500 uppercase">System Ledger</h2>
+            <button onclick="clearLedger()" class="text-[8px] font-mono text-slate-700 hover:text-slate-400 uppercase tracking-widest">CLEAR</button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-2 bg-[#02040a]" id="violation-ledger">
+            <div class="text-[9px] font-mono text-slate-700 p-2">// Waiting for events...</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ MESSAGE MODAL ═══ -->
+  <div id="modal-overlay" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center">
+    <div class="w-full max-w-sm border border-slate-700 bg-slate-900 shadow-2xl">
+      <div class="p-4 border-b border-slate-800 flex justify-between items-center">
+        <h3 class="text-xs font-bold uppercase tracking-widest text-slate-300">Send Proctor Warning</h3>
+        <button onclick="closeModal()" class="text-slate-500 hover:text-white font-mono text-lg leading-none">&times;</button>
+      </div>
+      <div class="p-4 space-y-3">
+        <div>
+          <label class="text-[9px] font-mono text-slate-500 uppercase tracking-widest block mb-1">Target Student</label>
+          <div id="modal-target-name" class="text-xs font-mono text-indigo-400 bg-indigo-950/30 border border-indigo-800/40 px-2 py-1.5"></div>
+        </div>
+        <div>
+          <label class="text-[9px] font-mono text-slate-500 uppercase tracking-widest block mb-1">Warning Message</label>
+          <textarea id="modal-message" placeholder="e.g. Please look at your screen and keep hands visible." class="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs font-mono p-2 h-20 resize-none focus:outline-none focus:border-indigo-500 transition-colors"></textarea>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="sendWarning()" class="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-mono text-xs py-2 uppercase tracking-widest border border-amber-400 transition-colors">Send Warning</button>
+          <button onclick="closeModal()" class="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs py-2 border border-slate-700 transition-colors">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ EXPORT MODAL ═══ -->
+  <div id="export-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+    <div class="w-full max-w-2xl border border-slate-700 bg-slate-900 shadow-2xl max-h-[80vh] flex flex-col">
+      <div class="p-4 border-b border-slate-800 flex justify-between items-center shrink-0">
+        <h3 class="text-xs font-bold uppercase tracking-widest text-emerald-400">Intelligence Report — CS-401_FINAL</h3>
+        <div class="flex items-center gap-3">
+          <button onclick="downloadReport()" class="text-[9px] font-mono bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 px-3 py-1.5 hover:bg-emerald-800/40 transition-colors uppercase">↓ Download JSON</button>
+          <button onclick="closeExportModal()" class="text-slate-500 hover:text-white font-mono text-lg leading-none">&times;</button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="export-content"></div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/admin-logic.js"></script>
+</body>
+</html>

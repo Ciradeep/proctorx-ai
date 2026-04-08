@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Exam Guardian — Mobile Secondary Camera</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #000; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    .header { background: #04060e; border-bottom: 1px solid #1e293b; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+    .header-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: #6366f1; }
+    .led { width: 8px; height: 8px; background: #334155; display: inline-block; }
+    .led.active { background: #10b981; animation: pulse 1s step-end infinite; }
+    .led.pending { background: #f59e0b; animation: pulse 0.6s step-end infinite; }
+    @keyframes pulse { 50% { opacity: 0.2; } }
+    .content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; gap: 16px; }
+    .card { background: #0f172a; border: 1px solid #1e293b; padding: 20px; width: 100%; max-width: 360px; }
+    label { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: 0.15em; color: #475569; margin-bottom: 6px; }
+    input { width: 100%; background: #020409; border: 1px solid #1e293b; color: #e2e8f0; padding: 10px 12px; font-family: inherit; font-size: 12px; text-transform: uppercase; outline: none; transition: border-color 0.2s; }
+    input:focus { border-color: #6366f1; }
+    input:read-only { color: #6366f1; border-color: #2e3a8c; background: #0a0f2e; }
+    .btn { width: 100%; background: #4f46e5; border: 1px solid #6366f1; color: #fff; font-family: inherit; font-size: 11px; font-weight: 700; padding: 12px; text-transform: uppercase; letter-spacing: 0.15em; cursor: pointer; transition: background 0.2s; }
+    .btn:hover { background: #4338ca; }
+    .btn:disabled { background: #1e293b; border-color: #334155; color: #475569; cursor: not-allowed; }
+    .btn.active { background: #059669; border-color: #10b981; }
+    .status-box { background: #020409; border: 1px solid #1e293b; padding: 10px 12px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; text-align: center; }
+    .status-box.connected { border-color: #10b981; color: #10b981; }
+    .status-box.pending { border-color: #f59e0b; color: #f59e0b; }
+    .status-box.error { border-color: #dc2626; color: #ef4444; }
+    #cam-section { width: 100%; max-width: 360px; display: none; }
+    #cam-label { display: flex; justify-content: space-between; font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; margin-bottom: 6px; }
+    video { width: 100%; border: 2px solid #f59e0b; display: block; }
+    .fps-info { font-size: 9px; color: #334155; text-align: center; margin-top: 4px; }
+    #frame-counter { color: #475569; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-title">Exam Guardian // 2ND_CAM</div>
+    <div style="display:flex; align-items:center; gap: 8px;">
+      <div class="led" id="conn-led"></div>
+      <span style="font-size:9px; color: #475569; text-transform: uppercase;" id="conn-label">Initializing</span>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- Status -->
+    <div class="status-box" id="status-box">Connecting to Exam Guardian server...</div>
+
+    <!-- Input card -->
+    <div class="card" id="input-card">
+      <div style="margin-bottom: 16px;">
+        <label>Student ID</label>
+        <input type="text" id="stud-id" placeholder="e.g. STD001" autocomplete="off" autocorrect="off" spellcheck="false">
+      </div>
+      <button class="btn" id="sync-btn" disabled>Sync Secondary Camera</button>
+    </div>
+
+    <!-- Camera section -->
+    <div id="cam-section">
+      <div id="cam-label">
+        <span>Transmitting to Proctor</span>
+        <span id="frame-counter" style="color: #f59e0b;">⌛ Starting...</span>
+      </div>
+      <video id="mob-vid" autoplay playsinline muted></video>
+      <canvas id="mob-canvas" style="display:none;"></canvas>
+      <div class="fps-info">Transmitting 1 frame/sec to proctoring engine</div>
+    </div>
+  </div>
+
+  <script>
+    const socket    = io(window.location.origin);
+    const examId    = 'CS-401_FINAL';
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetId  = urlParams.get('id');
+
+    const statusBox   = document.getElementById('status-box');
+    const inputCard   = document.getElementById('input-card');
+    const inputEl     = document.getElementById('stud-id');
+    const syncBtn     = document.getElementById('sync-btn');
+    const connLed     = document.getElementById('conn-led');
+    const connLabel   = document.getElementById('conn-label');
+    const camSection  = document.getElementById('cam-section');
+    const frameCounter = document.getElementById('frame-counter');
+
+    let framesSent = 0;
+
+    // Pre-fill from URL param
+    if (targetId) {
+      inputEl.value    = targetId.toUpperCase();
+      inputEl.readOnly = true;
+    }
+
+    // Socket events
+    socket.on('connect', () => {
+      connLed.className   = 'led active';
+      connLabel.textContent = 'Connected';
+      statusBox.className = 'status-box connected';
+      statusBox.textContent = '✓ Connected — Enter Student ID and sync camera';
+      syncBtn.disabled    = false;
+    });
+
+    socket.on('disconnect', () => {
+      connLed.className   = 'led pending';
+      connLabel.textContent = 'Reconnecting...';
+      statusBox.className = 'status-box error';
+      statusBox.textContent = '✗ Connection lost — attempting reconnect';
+      syncBtn.disabled    = true;
+    });
+
+    // Sync button
+    syncBtn.addEventListener('click', async () => {
+      const sId = inputEl.value.trim().toUpperCase();
+      if (!sId) {
+        statusBox.className   = 'status-box error';
+        statusBox.textContent = '✗ Please enter a valid Student ID';
+        return;
+      }
+
+      syncBtn.disabled    = true;
+      syncBtn.textContent = 'Requesting Camera...';
+      statusBox.className = 'status-box pending';
+      statusBox.textContent = '⌛ Requesting camera permission...';
+
+      try {
+        // Try rear camera first (environment); fall back to any camera
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+
+        const video = document.getElementById('mob-vid');
+        video.srcObject = stream;
+        await video.play();
+
+        // UI update
+        inputCard.style.display = 'none';
+        camSection.style.display = 'block';
+        statusBox.className = 'status-box connected';
+        statusBox.textContent = `✓ Transmitting secondary camera for ${sId}`;
+        connLed.className   = 'led active';
+
+        // Notify server
+        socket.emit('mobile:join', { examId, studentId: sId });
+
+        // Frame transmission (1 FPS via canvas snapshot)
+        const canvas = document.getElementById('mob-canvas');
+        const ctx    = canvas.getContext('2d');
+
+        setInterval(() => {
+          if (!video.videoWidth) return;
+          canvas.width  = Math.min(video.videoWidth, 640);
+          canvas.height = Math.round(canvas.width * (video.videoHeight / video.videoWidth));
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const frame = canvas.toDataURL('image/jpeg', 0.45);
+          socket.emit('mobile:frame', { examId, studentId: sId, image: frame });
+          framesSent++;
+          frameCounter.textContent = `✓ ${framesSent} frames sent`;
+          frameCounter.style.color = '#10b981';
+        }, 1000);
+
+      } catch (err) {
+        statusBox.className   = 'status-box error';
+        statusBox.textContent = '✗ Camera denied (HTTPS required). Initializing Simulation...';
+        console.error('[Mobile Cam]', err);
+
+        // FALLBACK: MOCK CAMERA FOR LOCAL NETWORK DEMOS
+        inputCard.style.display = 'none';
+        camSection.style.display = 'block';
+        document.getElementById('cam-label').innerHTML = `<span style="color:#f59e0b">Transmitting Mock Simulation (No HTTPS)</span><span id="frame-counter" style="color:#f59e0b;">⌛ Starting...</span>`;
+        
+        const video = document.getElementById('mob-vid');
+        video.style.display = 'none'; // hide broken video
+        const canvas = document.getElementById('mob-canvas');
+        canvas.style.display = 'block'; // show active canvas
+        canvas.width = 320;
+        canvas.height = 240;
+        const ctx = canvas.getContext('2d');
+        
+        connLed.className = 'led active';
+        socket.emit('mobile:join', { examId, studentId: sId });
+        
+        let frameToggle = false;
+        setInterval(() => {
+          // Draw mock "recording" dashboard
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          ctx.fillStyle = '#10b981';
+          ctx.font = '14px JetBrains Mono';
+          ctx.fillText(`SIMULATED MOBILE FEED`, 20, 30);
+          ctx.fillStyle = '#475569';
+          ctx.fillText(`STUDENT: ${sId}`, 20, 55);
+          ctx.fillText(`NETWORK: INSECURE_LOCAL`, 20, 75);
+          
+          // Draw radar animation
+          ctx.strokeStyle = frameToggle ? '#f59e0b' : '#ef4444';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(160, 160, frameToggle ? 40 : 35, 0, Math.PI * 2);
+          ctx.stroke();
+          
+          frameToggle = !frameToggle;
+
+          const frame = canvas.toDataURL('image/jpeg', 0.4);
+          socket.emit('mobile:frame', { examId, studentId: sId, image: frame });
+          framesSent++;
+          const fc = document.getElementById('frame-counter');
+          if (fc) {
+            fc.textContent = `✓ ${framesSent} sim frames`;
+            fc.style.color = '#10b981';
+          }
+        }, 500);
+      }
+    });
+  </script>
+</body>
+</html>

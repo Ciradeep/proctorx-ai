@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .gc-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .gc-scrollbar::-webkit-scrollbar-track {
+    background: #020617; /* slate-950 */
+    border-left: 1px solid #1e293b; /* slate-800 */
+  }
+  .gc-scrollbar::-webkit-scrollbar-thumb {
+    background: #334155; /* slate-700 */
+    border-radius: 0;
+  }
+  .gc-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #475569; /* slate-600 */
+  }
+
+  .blink {
+    animation: blinker 1s linear infinite;
+  }
+  .blink-slow {
+    animation: blinker 3s linear infinite;
+  }
+  
+  @keyframes blinker {
+    50% { opacity: 0; }
+  }
+  
+  /* Disable any rounded corners globally overriding Tailwind if needed but Tailwind rounded-none works */
+  
+  /* Solid colors - ensuring no gradients are used */
+  .text-crimson-500 {
+    color: #ef4444; /* Standard Red-500 equivalent */
+  }
+}

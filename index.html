@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Guardian - Secure Examination</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { inter: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+          colors: { crimson: { 400: '#f87171', 500: '#ef4444', 600: '#dc2626', 950: '#1a0000' } }
+        }
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    .blink { animation: blink 0.8s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0.2; } }
+    .option-btn { transition: all 0.15s ease; }
+    .option-btn:hover { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.6); }
+    .option-btn.selected { background: rgba(99,102,241,0.25); border-color: #6366f1; color: #c7d2fe; }
+    .option-btn.correct { background: rgba(16,185,129,0.2); border-color: #10b981; color: #a7f3d0; }
+    .option-btn.wrong { background: rgba(220,38,38,0.2); border-color: #dc2626; color: #fca5a5; }
+    #admin-warning { animation: slideDown 0.4s ease; }
+    @keyframes slideDown { from { transform: translateY(-100%); opacity:0; } to { transform: translateY(0); opacity:1; } }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-inter text-sm antialiased flex flex-col h-screen overflow-hidden">
+
+  <!-- ADMIN WARNING BANNER (hidden by default) -->
+  <div id="admin-warning" class="hidden shrink-0 bg-amber-900/80 border-b-2 border-amber-500 px-6 py-2 flex items-center gap-3 z-50">
+    <div class="w-2 h-2 bg-amber-400 rounded-full blink"></div>
+    <span class="text-[11px] font-mono text-amber-300 uppercase tracking-widest font-bold">PROCTOR ALERT:</span>
+    <span id="warning-text" class="text-xs text-amber-100 font-mono"></span>
+  </div>
+
+  <!-- TOP STATUS BAR -->
+  <div class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 shrink-0">
+    <div class="flex items-center gap-3">
+       <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">EXAM_SESSION:</span>
+       <span class="text-xs font-mono text-emerald-500 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5">CS-401_FINAL</span>
+       <div class="w-px h-4 bg-slate-800"></div>
+       <span id="student-id-display" class="text-[10px] font-mono text-slate-500 uppercase tracking-wider"></span>
+    </div>
+    <div class="flex items-center gap-4">
+       <button onclick="Auth.logout()" class="text-[9px] font-mono tracking-widest text-slate-400 hover:text-crimson-400 hover:underline cursor-pointer uppercase">[ ABORT SESSION ]</button>
+       <div class="w-px h-4 bg-slate-800"></div>
+       <div class="flex items-center gap-2">
+         <div class="w-2 h-2 bg-red-500 rounded-none blink" id="audio-dot" style="display:none;"></div>
+         <span class="text-[10px] font-mono tracking-wider" id="audio-label" style="display:none; color:#ef4444;">AUDIO REC</span>
+       </div>
+       <div class="w-px h-4 bg-slate-700"></div>
+       <span class="text-xs font-mono text-slate-400" id="timer">--:--:--</span>
+       <!-- Progress -->
+       <div class="hidden sm:flex items-center gap-1" id="progress-bar-wrap">
+         <span class="text-[9px] font-mono text-slate-500 uppercase tracking-widest" id="q-progress">Q 0/0</span>
+       </div>
+    </div>
+  </div>
+
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="flex-1 p-6 overflow-y-auto bg-slate-950 flex flex-col">
+
+      <!-- ===== SETUP / WAITING VIEW ===== -->
+      <div id="setup-view" class="flex-1 flex items-center justify-center">
+        <div class="max-w-lg w-full border border-slate-800 bg-slate-900 shadow-2xl">
+          <!-- Header -->
+          <div class="p-5 border-b border-slate-800 bg-black/30 flex items-center justify-between">
+            <div>
+              <h1 class="text-base font-bold uppercase tracking-widest">Exam Guardian</h1>
+              <div class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">Secure Pre-Exam Protocol</div>
+            </div>
+            <div class="w-2 h-2 bg-amber-500 rounded-none blink" id="setup-led"></div>
+          </div>
+
+          <!-- Steps -->
+          <div class="p-6 space-y-4">
+            <!-- Step 1: Camera -->
+            <div class="flex items-start gap-3 p-3 border border-slate-800 bg-slate-950/50" id="step-camera">
+              <div class="w-6 h-6 font-mono text-xs border border-slate-700 flex items-center justify-center shrink-0" id="step-camera-num">1</div>
+              <div class="flex-1">
+                <div class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Primary Camera</div>
+                <div class="text-[10px] font-mono text-slate-500 mt-0.5" id="step-camera-status">Initializing MediaPipe neural mesh...</div>
+              </div>
+            </div>
+            <!-- Step 2: Request Access -->
+            <div class="flex items-start gap-3 p-3 border border-slate-800 bg-slate-950/50" id="step-access">
+              <div class="w-6 h-6 font-mono text-xs border border-slate-700 flex items-center justify-center shrink-0 text-slate-600" id="step-access-num">2</div>
+              <div class="flex-1">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Request Proctor Access</div>
+                <div class="text-[10px] font-mono text-slate-600 mt-0.5" id="step-access-status">Awaiting camera init...</div>
+              </div>
+            </div>
+            <!-- Step 3: Mobile -->
+            <div class="flex items-start gap-3 p-3 border border-slate-800 bg-slate-950/50" id="step-mobile">
+              <div class="w-6 h-6 font-mono text-xs border border-slate-700 flex items-center justify-center shrink-0 text-slate-600" id="step-mobile-num">3</div>
+              <div class="flex-1">
+                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Secondary Mobile Camera</div>
+                <div class="text-[10px] font-mono text-slate-600 mt-0.5" id="step-mobile-status">Awaiting admin approval...</div>
+                <div id="qr-container" class="hidden mt-3 inline-block bg-white p-1.5"></div>
+                <div id="mobile-url-text" class="hidden text-[10px] font-mono text-amber-500/70 mt-1 break-all"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Area -->
+          <div class="p-6 border-t border-slate-800 flex flex-col gap-3">
+            <button id="start-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-sm px-6 py-3 uppercase tracking-widest border border-indigo-400 transition-all" disabled>
+              Initializing Camera...
+            </button>
+            <!-- DEMO BYPASS -->
+            <button id="bypass-btn" class="hidden w-full bg-transparent border border-slate-700 hover:border-amber-500/50 text-slate-500 hover:text-amber-500 font-mono text-[10px] px-4 py-2 uppercase tracking-widest transition-all" onclick="bypassMobileAndStart()">
+              [ DEMO MODE: Skip Mobile Camera &amp; Start Immediately ]
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== EXAM QUESTION VIEW ===== -->
+      <div id="test-view" class="hidden flex-1 flex flex-col max-w-3xl mx-auto w-full">
+        <!-- Question Navigator -->
+        <div class="flex gap-1.5 flex-wrap mb-4" id="q-nav"></div>
+
+        <!-- Question Card -->
+        <div class="border border-slate-800 bg-slate-900 p-8 shadow-2xl flex-1 flex flex-col">
+          <div class="flex justify-between items-start border-b border-slate-800 pb-4 mb-6">
+            <div>
+              <div class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-1" id="section-title">Section</div>
+              <h2 id="question-title" class="text-base font-semibold text-slate-200">Question</h2>
+            </div>
+            <div class="text-right shrink-0 ml-4">
+              <div class="text-[9px] font-mono text-slate-600 uppercase">MARKS</div>
+              <div id="q-marks" class="text-sm font-mono font-bold text-indigo-400">+4 / -1</div>
+            </div>
+          </div>
+
+          <p id="question-text" class="text-[15px] text-slate-300 leading-relaxed mb-6 font-inter flex-1"></p>
+
+          <div id="options-container" class="space-y-2 font-mono text-sm mb-6"></div>
+
+          <!-- Code snippet area (optional) -->
+          <pre id="code-block" class="hidden bg-black/60 border border-slate-800 p-4 text-xs font-mono text-emerald-400 rounded-none mb-4 overflow-x-auto"></pre>
+
+          <div class="mt-auto pt-4 border-t border-slate-800 flex justify-between gap-3">
+            <div class="flex gap-2">
+              <button id="prev-btn" class="bg-transparent border border-slate-700 text-slate-400 px-4 py-2 font-mono text-xs hover:bg-slate-800 transition-colors disabled:opacity-30" onclick="prevQuestion()">← PREV</button>
+              <button id="flag-btn" class="bg-transparent border border-slate-700 text-amber-600 px-4 py-2 font-mono text-xs hover:bg-amber-900/20 hover:border-amber-500/50 transition-colors" onclick="flagQuestion()">FLAG</button>
+            </div>
+            <button id="next-btn" class="bg-indigo-600 border border-indigo-500 text-white px-6 py-2 font-mono text-xs hover:bg-indigo-500 transition-colors">NEXT →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SUBMISSION VIEW ===== -->
+      <div id="submit-view" class="hidden flex-1 flex items-center justify-center">
+        <div class="max-w-md w-full border border-slate-800 bg-slate-900 p-8 text-center">
+          <div class="w-12 h-12 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <h2 class="text-lg font-bold uppercase tracking-wider text-emerald-400 mb-2">Exam Submitted</h2>
+          <p class="text-slate-400 font-mono text-xs mb-6">Your responses have been cryptographically sealed and submitted to the proctoring engine.</p>
+          <div id="score-summary" class="bg-black/50 border border-slate-800 p-4 font-mono text-xs space-y-2 text-left mb-4"></div>
+          <button onclick="Auth.logout()" class="w-full border border-slate-700 text-slate-400 hover:text-white font-mono text-xs py-2 uppercase tracking-widest hover:bg-slate-800 transition-colors">Return to Portal</button>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- RIGHT: PROCTOR TERMINAL -->
+    <aside class="w-72 border-l border-slate-800 bg-slate-900 flex flex-col shrink-0">
+
+       <!-- CAMERA PANEL -->
+       <div class="border-b border-slate-800 bg-black relative" style="aspect-ratio:4/3;">
+         <video id="videoElement" autoplay playsinline class="absolute inset-0 w-full h-full object-cover transform -scale-x-100 opacity-0 transition-opacity duration-1000"></video>
+         <canvas id="output_canvas" class="absolute inset-0 w-full h-full object-cover transform -scale-x-100 z-10"></canvas>
+
+         <div id="cam-loading" class="absolute inset-0 flex items-center justify-center z-20">
+           <span class="text-[10px] font-mono text-slate-500 animate-pulse">ALLOCATING WEBCAM...</span>
+         </div>
+
+         <!-- HUD Overlay -->
+         <div class="absolute top-1.5 left-1.5 z-20 pointer-events-none">
+           <div class="bg-black/80 border border-slate-700 px-1.5 py-0.5 flex items-center gap-1.5">
+             <div class="w-1.5 h-1.5 bg-red-500 rounded-none blink" id="rec-dot" style="display:none;"></div>
+             <span class="text-[9px] font-mono text-white tracking-widest">FEED_01</span>
+           </div>
+         </div>
+         <!-- Risk HUD -->
+         <div class="absolute bottom-1.5 right-1.5 z-20 pointer-events-none">
+           <div class="bg-black/80 border border-slate-700 px-2 py-0.5">
+             <span id="hud-risk" class="text-[10px] font-mono font-bold text-emerald-400">RISK: 000</span>
+           </div>
+         </div>
+       </div>
+
+       <!-- TELEMETRY -->
+       <div class="p-3 border-b border-slate-800 space-y-3">
+         <h3 class="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Runtime Telemetry</h3>
+         <div class="grid grid-cols-2 gap-2 font-mono text-[10px]">
+           <div class="bg-slate-950 border border-slate-800 p-2">
+             <div class="text-slate-600 mb-0.5">PITCH_X</div>
+             <div id="val-pitch" class="text-slate-300 font-bold">0.0°</div>
+           </div>
+           <div class="bg-slate-950 border border-slate-800 p-2">
+             <div class="text-slate-600 mb-0.5">YAW_Y</div>
+             <div id="val-yaw" class="text-slate-300 font-bold">0.0°</div>
+           </div>
+           <div class="bg-slate-950 border border-slate-800 p-2">
+             <div class="text-slate-600 mb-0.5">GAZE_VEC</div>
+             <div id="val-gaze" class="text-slate-500 font-bold">AWAITING</div>
+           </div>
+           <div class="bg-slate-950 border border-slate-800 p-2">
+             <div class="text-slate-600 mb-0.5">FACE_DET</div>
+             <div id="val-face" class="text-slate-500 font-bold">---</div>
+           </div>
+         </div>
+       </div>
+
+       <!-- VIOLATION LOG (student-side) -->
+       <div class="flex-1 overflow-y-auto p-3" id="local-log">
+         <h3 class="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-2">Activity Log</h3>
+         <div id="local-log-entries" class="space-y-1 font-mono text-[9px] text-slate-600">
+           <div>// Session initializing...</div>
+         </div>
+       </div>
+
+       <!-- NETWORK STATUS -->
+       <div class="h-8 bg-black border-t border-slate-800 flex items-center px-3 gap-2 shrink-0">
+          <div class="w-2 h-2 bg-yellow-500 rounded-none" id="net-led"></div>
+          <span class="text-[9px] font-mono text-slate-400 uppercase tracking-widest" id="net-status">WSS:// CONNECTING...</span>
+       </div>
+    </aside>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    // ============================================================
+    // QUESTION BANK
+    // ============================================================
+    const EXAM_QUESTIONS = [
+      {
+        id: 1, section: 'Data Structures', marks: '+4 / -1',
+        title: 'Q1 — Time Complexity',
+        text: 'What is the worst-case time complexity of QuickSort?',
+        options: ['O(n log n)', 'O(n²)', 'O(n)', 'O(log n)'],
+        correct: 1
+      },
+      {
+        id: 2, section: 'Networks', marks: '+4 / -1',
+        title: 'Q2 — OSI Model',
+        text: 'Which OSI layer is responsible for end-to-end error recovery and flow control?',
+        options: ['Network Layer', 'Data Link Layer', 'Transport Layer', 'Session Layer'],
+        correct: 2
+      },
+      {
+        id: 3, section: 'Operating Systems', marks: '+4 / -1',
+        title: 'Q3 — Process Scheduling',
+        text: 'Which scheduling algorithm gives the minimum average waiting time for a given set of processes?',
+        options: ['First Come First Serve (FCFS)', 'Shortest Job First (SJF)', 'Round Robin', 'Priority Scheduling'],
+        correct: 1
+      },
+      {
+        id: 4, section: 'Databases', marks: '+4 / -1',
+        title: 'Q4 — ACID Properties',
+        text: 'In a relational database transaction, "Atomicity" ensures that:',
+        options: [
+          'All operations complete or none complete',
+          'Concurrent transactions do not interfere',
+          'Committed data is permanently stored',
+          'Data remains consistent before and after transaction'
+        ],
+        correct: 0
+      },
+      {
+        id: 5, section: 'Data Structures', marks: '+4 / -1',
+        title: 'Q5 — Tree Traversal',
+        text: 'For a Binary Search Tree (BST), which traversal produces nodes in sorted (ascending) order?',
+        options: ['Pre-order', 'Post-order', 'In-order', 'Level-order'],
+        correct: 2
+      },
+      {
+        id: 6, section: 'Algorithms', marks: '+4 / -1',
+        title: 'Q6 — Dynamic Programming',
+        text: 'The Bellman-Ford algorithm correctly handles graphs with:',
+        options: [
+          'Only positive weights',
+          'Negative cycles',
+          'Negative weights (no negative cycles)',
+          'Unweighted edges only'
+        ],
+        correct: 2
+      },
+      {
+        id: 7, section: 'Computer Architecture', marks: '+4 / -1',
+        title: 'Q7 — Cache Memory',
+        text: 'In a direct-mapped cache with 1024 blocks and 64-byte block size, what is the size of the offset field?',
+        options: ['6 bits', '10 bits', '4 bits', '8 bits'],
+        correct: 0
+      },
+      {
+        id: 8, section: 'Networks', marks: '+4 / -1',
+        title: 'Q8 — TCP/IP',
+        text: 'Which flag in the TCP header is used to abruptly terminate a connection?',
+        options: ['SYN', 'FIN', 'RST', 'ACK'],
+        correct: 2
+      },
+      {
+        id: 9, section: 'Operating Systems', marks: '+4 / -1',
+        title: 'Q9 — Deadlock',
+        text: 'Which of the following IS NOT a necessary condition for deadlock?',
+        options: ['Mutual Exclusion', 'Preemption', 'Hold and Wait', 'Circular Wait'],
+        correct: 1
+      },
+      {
+        id: 10, section: 'Algorithms', marks: '+4 / -1',
+        title: 'Q10 — Graph Theory',
+        text: 'Dijkstra\'s algorithm fails when the graph contains:',
+        options: ['Undirected edges', 'Negative weight edges', 'Disconnected vertices', 'Weighted edges'],
+        correct: 1
+      }
+    ];
+
+    // ============================================================
+    // STATE
+    // ============================================================
+    const user = Auth.requireAuth('student');
+    const examId = 'CS-401_FINAL';
+    const EXAM_DURATION = 90 * 60; // 90 minutes in seconds
+
+    let currentQ = 0;
+    let answers = new Array(EXAM_QUESTIONS.length).fill(null);
+    let flagged = new Array(EXAM_QUESTIONS.length).fill(false);
+    let examActive = false;
+    let timerInterval = null;
+    let timeLeft = EXAM_DURATION;
+    let mobileSynced = false;
+    let accessGranted = false;
+
+    document.getElementById('student-id-display').textContent = user.id + ' · ' + user.name;
+
+    // ============================================================
+    // SOCKET SETUP
+    // ============================================================
+    const socket = io(window.location.origin);
+
+    socket.on('connect', () => {
+      setNetStatus('CONNECTED', 'emerald');
+    });
+
+    socket.on('disconnect', () => {
+      setNetStatus('DISCONNECTED', 'red');
+    });
+
+    function setNetStatus(text, color) {
+      const led = document.getElementById('net-led');
+      const status = document.getElementById('net-status');
+      const colorMap = { emerald: 'bg-emerald-500', red: 'bg-red-500', yellow: 'bg-yellow-500' };
+      led.className = `w-2 h-2 rounded-none ${colorMap[color] || colorMap.yellow}`;
+      status.textContent = `WSS:// ${text}`;
+    }
+
+    // Admin sent a warning
+    socket.on('admin:broadcast', (data) => {
+      if (data.studentId !== user.id && data.studentId !== 'all') return;
+      const banner = document.getElementById('admin-warning');
+      document.getElementById('warning-text').textContent = data.message;
+      banner.classList.remove('hidden');
+      logLocal(`PROCTOR: ${data.message}`, 'amber');
+      setTimeout(() => banner.classList.add('hidden'), 10000);
+    });
+
+    // Admin terminated exam
+    socket.on('student:terminated', (data) => {
+      if (data.studentId !== user.id) return;
+      examActive = false;
+      clearInterval(timerInterval);
+      document.getElementById('test-view').classList.add('hidden');
+      document.getElementById('setup-view').classList.add('hidden');
+      const submitView = document.getElementById('submit-view');
+      submitView.classList.remove('hidden');
+      document.getElementById('score-summary').innerHTML = `<div class="text-crimson-400 font-bold uppercase tracking-wider">// SESSION TERMINATED BY PROCTOR</div><div class="text-slate-500 mt-1">Your exam has been forcefully closed by the administrator.</div>`;
+    });
+
+    // ============================================================
+    // QR / MOBILE SYNC
+    // ============================================================
+    function renderQR(studentId) {
+      const qrContainer = document.getElementById('qr-container');
+      const mobileUrl = `${window.location.origin}/mobile.html?id=${studentId}`;
+      document.getElementById('mobile-url-text').textContent = mobileUrl;
+      document.getElementById('mobile-url-text').classList.remove('hidden');
+      qrContainer.classList.remove('hidden');
+      qrContainer.innerHTML = '';
+      if (typeof QRCode !== 'undefined') {
+        new QRCode(qrContainer, { text: mobileUrl, width: 110, height: 110 });
+      }
+      document.getElementById('step-mobile-status').textContent = 'Scan QR or open URL on your phone...';
+      markStep('step-mobile', 'pending');
+      markStep('step-mobile-num', 'pending');
+    }
+
+    socket.on('student:mobile_synced', () => {
+      mobileSynced = true;
+      markStep('step-mobile', 'done');
+      markStep('step-mobile-num', 'done');
+      document.getElementById('step-mobile-status').textContent = '✓ Secondary camera linked!';
+      document.getElementById('qr-container').classList.add('hidden');
+      document.getElementById('start-btn').textContent = 'BEGIN EXAM SESSION →';
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('start-btn').className = 'w-full bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-sm px-6 py-3 uppercase tracking-widest border border-emerald-400 transition-all';
+      document.getElementById('start-btn').onclick = launchExam;
+      document.getElementById('bypass-btn').classList.add('hidden');
+      logLocal('Mobile camera sync confirmed', 'emerald');
+    });
+
+    socket.on('student:access_granted', (res) => {
+      if (res.approved) {
+        accessGranted = true;
+        markStep('step-access', 'done');
+        markStep('step-access-num', 'done');
+        document.getElementById('step-access-status').textContent = '✓ Admin approved — awaiting mobile cam...';
+        startAudioMonitoring();
+        renderQR(user.id);
+        document.getElementById('bypass-btn').classList.remove('hidden');
+        logLocal('Access granted by proctor', 'emerald');
+      } else {
+        markStep('step-access', 'error');
+        document.getElementById('step-access-status').textContent = '✗ Access denied by administrator.';
+        document.getElementById('start-btn').textContent = 'ACCESS DENIED';
+        document.getElementById('start-btn').className = 'w-full bg-crimson-600/30 border border-crimson-500/50 text-crimson-400 font-mono text-sm px-6 py-3 uppercase tracking-widest cursor-not-allowed';
+        logLocal('Access denied by proctor', 'red');
+      }
+    });
+
+    function bypassMobileAndStart() {
+      mobileSynced = true;
+      markStep('step-mobile', 'done');
+      markStep('step-mobile-num', 'done');
+      document.getElementById('step-mobile-status').textContent = '⚡ Demo mode: Mobile cam bypassed';
+      document.getElementById('qr-container').classList.add('hidden');
+      launchExam();
+    }
+
+    function launchExam() {
+      socket.emit('student:join', { examId, studentId: user.id, studentName: user.name });
+      document.getElementById('setup-view').classList.add('hidden');
+      document.getElementById('test-view').classList.remove('hidden');
+      document.getElementById('setup-led').style.display = 'none';
+      document.getElementById('rec-dot').style.display = 'block';
+      document.getElementById('audio-dot').style.display = 'block';
+      document.getElementById('audio-label').style.display = 'block';
+      examActive = true;
+      startTimer();
+      renderQuestion();
+      buildNavBar();
+      logLocal('Exam session started', 'emerald');
+    }
+
+    // ============================================================
+    // STEP MARKER HELPERS
+    // ============================================================
+    function markStep(id, state) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (id.endsWith('-num')) {
+        if (state === 'done') { el.className = el.className.replace('border-slate-700 text-slate-600', 'border-emerald-500 text-emerald-400 bg-emerald-500/10'); el.textContent = '✓'; }
+        if (state === 'pending') { el.className = el.className.replace(/border-\w+-\d+ text-\w+-\d+/g, ''); el.className += ' border-amber-500 text-amber-400 bg-amber-500/10'; }
+        if (state === 'error') { el.className += ' border-crimson-500 text-crimson-400 bg-crimson-500/10'; }
+        return;
+      }
+      if (state === 'done') el.classList.add('border-emerald-500/30', 'bg-emerald-900/10');
+      if (state === 'pending') el.classList.add('border-amber-500/30', 'bg-amber-900/10');
+      if (state === 'error') el.classList.add('border-crimson-500/30', 'bg-crimson-900/10');
+    }
+
+    // ============================================================
+    // TIMER
+    // ============================================================
+    function startTimer() {
+      const el = document.getElementById('timer');
+      timerInterval = setInterval(() => {
+        if (timeLeft <= 0) { clearInterval(timerInterval); submitExam(); return; }
+        timeLeft--;
+        const h = String(Math.floor(timeLeft / 3600)).padStart(2, '0');
+        const m = String(Math.floor((timeLeft % 3600) / 60)).padStart(2, '0');
+        const s = String(timeLeft % 60).padStart(2, '0');
+        el.textContent = `${h}:${m}:${s}`;
+        if (timeLeft < 300) el.classList.add('text-crimson-400', 'blink'); // Last 5 min warning
+      }, 1000);
+    }
+
+    // ============================================================
+    // QUESTION RENDERING
+    // ============================================================
+    function renderQuestion() {
+      const q = EXAM_QUESTIONS[currentQ];
+      document.getElementById('section-title').textContent = q.section;
+      document.getElementById('question-title').textContent = q.title;
+      document.getElementById('question-text').textContent = q.text;
+      document.getElementById('q-marks').textContent = q.marks;
+      document.getElementById('q-progress').textContent = `Q ${currentQ + 1}/${EXAM_QUESTIONS.length}`;
+
+      const opts = document.getElementById('options-container');
+      opts.innerHTML = '';
+      q.options.forEach((opt, i) => {
+        const isSelected = answers[currentQ] === i;
+        const btn = document.createElement('button');
+        btn.className = `option-btn w-full text-left px-4 py-3 border font-mono text-xs ${isSelected ? 'selected border-indigo-500 bg-indigo-500/20 text-indigo-200' : 'border-slate-700 text-slate-300 bg-slate-950/50'}`;
+        btn.innerHTML = `<span class="text-slate-500 mr-2">[${String.fromCharCode(65 + i)}]</span> ${opt}`;
+        btn.onclick = () => selectAnswer(i);
+        if (isSelected) btn.id = 'selected-opt';
+        opts.appendChild(btn);
+      });
+
+      // Prev button state
+      document.getElementById('prev-btn').disabled = currentQ === 0;
+      // Next/Submit button
+      const nextBtn = document.getElementById('next-btn');
+      if (currentQ === EXAM_QUESTIONS.length - 1) {
+        nextBtn.textContent = 'SUBMIT EXAM ✓';
+        nextBtn.className = 'bg-emerald-600 border border-emerald-500 text-white px-6 py-2 font-mono text-xs hover:bg-emerald-500 transition-colors';
+        nextBtn.onclick = submitExam;
+      } else {
+        nextBtn.textContent = 'NEXT →';
+        nextBtn.className = 'bg-indigo-600 border border-indigo-500 text-white px-6 py-2 font-mono text-xs hover:bg-indigo-500 transition-colors';
+        nextBtn.onclick = nextQuestion;
+      }
+
+      // Flag styling
+      const flagBtn = document.getElementById('flag-btn');
+      flagBtn.className = flagged[currentQ]
+        ? 'bg-amber-900/30 border border-amber-500/60 text-amber-400 px-4 py-2 font-mono text-xs transition-colors'
+        : 'bg-transparent border border-slate-700 text-amber-600 px-4 py-2 font-mono text-xs hover:bg-amber-900/20 hover:border-amber-500/50 transition-colors';
+
+      updateNavBar();
+    }
+
+    function selectAnswer(optIdx) {
+      answers[currentQ] = optIdx;
+      renderQuestion();
+      logLocal(`Q${currentQ + 1}: Option [${String.fromCharCode(65 + optIdx)}] selected`);
+    }
+
+    function nextQuestion() {
+      if (currentQ < EXAM_QUESTIONS.length - 1) { currentQ++; renderQuestion(); }
+    }
+
+    function prevQuestion() {
+      if (currentQ > 0) { currentQ--; renderQuestion(); }
+    }
+
+    function flagQuestion() {
+      flagged[currentQ] = !flagged[currentQ];
+      renderQuestion();
+      logLocal(`Q${currentQ + 1}: ${flagged[currentQ] ? 'Flagged for review' : 'Flag removed'}`);
+    }
+
+    function buildNavBar() {
+      const nav = document.getElementById('q-nav');
+      nav.innerHTML = '';
+      EXAM_QUESTIONS.forEach((_, i) => {
+        const btn = document.createElement('button');
+        btn.id = `nav-q-${i}`;
+        btn.className = 'w-7 h-7 font-mono text-[10px] border border-slate-700 text-slate-500 hover:border-indigo-400 transition-colors';
+        btn.textContent = i + 1;
+        btn.onclick = () => { currentQ = i; renderQuestion(); };
+        nav.appendChild(btn);
+      });
+    }
+
+    function updateNavBar() {
+      EXAM_QUESTIONS.forEach((_, i) => {
+        const btn = document.getElementById(`nav-q-${i}`);
+        if (!btn) return;
+        if (i === currentQ) {
+          btn.className = 'w-7 h-7 font-mono text-[10px] border-2 border-indigo-500 text-indigo-300 bg-indigo-500/20 transition-colors';
+        } else if (flagged[i]) {
+          btn.className = 'w-7 h-7 font-mono text-[10px] border border-amber-500/60 text-amber-400 bg-amber-900/20 transition-colors';
+        } else if (answers[i] !== null) {
+          btn.className = 'w-7 h-7 font-mono text-[10px] border border-emerald-500/50 text-emerald-400 bg-emerald-900/10 transition-colors';
+        } else {
+          btn.className = 'w-7 h-7 font-mono text-[10px] border border-slate-700 text-slate-500 hover:border-indigo-400 transition-colors';
+        }
+        btn.textContent = i + 1;
+      });
+    }
+
+    // ============================================================
+    // EXAM SUBMISSION
+    // ============================================================
+    function submitExam() {
+      if (!examActive) return;
+      examActive = false;
+      clearInterval(timerInterval);
+
+      socket.emit('event:trigger', { event: 'exam_submitted', details: 'Student explicitly submitted exam' });
+
+      // Score calculation
+      let correct = 0, incorrect = 0, skipped = 0;
+      answers.forEach((ans, i) => {
+        if (ans === null) skipped++;
+        else if (ans === EXAM_QUESTIONS[i].correct) correct++;
+        else incorrect++;
+      });
+      const score = correct * 4 - incorrect;
+
+      document.getElementById('test-view').classList.add('hidden');
+      document.getElementById('submit-view').classList.remove('hidden');
+      document.getElementById('score-summary').innerHTML = `
+        <div class="flex justify-between text-slate-300"><span>Correct Answers</span><span class="text-emerald-400 font-bold">${correct} / ${EXAM_QUESTIONS.length}</span></div>
+        <div class="flex justify-between text-slate-300"><span>Incorrect</span><span class="text-crimson-400">${incorrect}</span></div>
+        <div class="flex justify-between text-slate-300"><span>Skipped</span><span class="text-slate-500">${skipped}</span></div>
+        <div class="h-px bg-slate-800 my-1"></div>
+        <div class="flex justify-between text-white font-bold"><span>Final Score</span><span class="text-indigo-400">${score} / ${EXAM_QUESTIONS.length * 4}</span></div>
+      `;
+    }
+
+    // ============================================================
+    // LOCAL LOG
+    // ============================================================
+    function logLocal(msg, color = 'slate') {
+      const colorMap = { slate: 'text-slate-500', emerald: 'text-emerald-400', amber: 'text-amber-400', red: 'text-crimson-400' };
+      const el = document.getElementById('local-log-entries');
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      el.insertAdjacentHTML('afterbegin', `<div class="${colorMap[color] || colorMap.slate}">[${now}] ${msg}</div>`);
+    }
+  </script>
+  <script src="js/proctor-engine.js"></script>
+</body>
+</html>
