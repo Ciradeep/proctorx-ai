@@ -198,10 +198,10 @@ function onFaceMeshResults(results) {
     document.getElementById('val-pitch').textContent = '---';
     document.getElementById('val-yaw').textContent   = '---';
 
-    if (framesLost > 15 && framesLost % 15 === 0 && examActive) {
+    if (framesLost > 10 && framesLost % 10 === 0 && examActive) {
       socket.emit('event:trigger', {
         event: 'face_lost',
-        details: `Primary face ID lost from frame (${Math.floor(framesLost / 15)}s)`
+        details: `Primary face ID lost from frame (${Math.floor(framesLost / 10)}s)`
       });
       logLocal('Face lost from camera frame', 'red');
     }
