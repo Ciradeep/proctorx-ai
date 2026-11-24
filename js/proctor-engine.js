@@ -90,25 +90,27 @@ const camera = new Camera(videoElement, {
   width: 640, height: 480
 });
 
-camera.start().then(() => {
-  startBtn.disabled = false;
-  startBtn.textContent = 'REQUEST EXAM ACCESS →';
-  videoElement.style.opacity = '1';
-  document.getElementById('cam-loading').style.display = 'none';
-  markStep('step-camera', 'done');
-  markStep('step-camera-num', 'done');
-  document.getElementById('step-camera-status').textContent = '✓ Neural mesh active — face tracking online';
-  markStep('step-access', 'pending');
-  document.getElementById('step-access-status').textContent = 'Ready — click button below to request access';
-  logLocal('Camera initialized successfully', 'emerald');
-}).catch(err => {
-  document.getElementById('cam-loading').textContent = 'CAM ERROR';
-  document.getElementById('step-camera-status').textContent = '✗ Camera failed: ' + err.message;
-  logLocal('Camera init failed: ' + err.message, 'red');
-  // Still allow demo access without camera
-  startBtn.disabled = false;
-  startBtn.textContent = 'REQUEST ACCESS (CAM UNAVAIL)';
-});
+window.startCameraEngine = function() {
+  camera.start().then(() => {
+    startBtn.disabled = false;
+    startBtn.textContent = 'REQUEST EXAM ACCESS →';
+    videoElement.style.opacity = '1';
+    document.getElementById('cam-loading').style.display = 'none';
+    markStep('step-camera', 'done');
+    markStep('step-camera-num', 'done');
+    document.getElementById('step-camera-status').textContent = '✓ Neural mesh active — face tracking online';
+    markStep('step-access', 'pending');
+    document.getElementById('step-access-status').textContent = 'Ready — click button below to request access';
+    logLocal('Camera initialized successfully', 'emerald');
+  }).catch(err => {
+    document.getElementById('cam-loading').textContent = 'CAM ERROR';
+    document.getElementById('step-camera-status').textContent = '✗ Camera failed: ' + err.message;
+    logLocal('Camera init failed: ' + err.message, 'red');
+    // Still allow demo access without camera
+    startBtn.disabled = false;
+    startBtn.textContent = 'REQUEST ACCESS (CAM UNAVAIL)';
+  });
+};
 
 // --- AI EVALUATION LOGIC ---
 let framesLost = 0;

@@ -3,230 +3,486 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Exam Guardian — Admin Command Center</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <title>Exam Guardian - Admin Console</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: { inter: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
-          colors: { crimson: { 400: '#f87171', 500: '#ef4444', 600: '#dc2626', 950: '#1a0000' } }
-        }
-      }
+      theme: { extend: { fontFamily: { sans: ['Outfit', 'sans-serif'], mono: ['monospace'] } } }
     }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
-    .blink { animation: blink 0.8s step-end infinite; }
+    body { font-family: 'Outfit', sans-serif; background-color: #0b1121; }
+    .glass-panel { background: rgba(30, 41, 59, 0.4); backdrop-filter: blur(16px); border-right: 1px solid rgba(255,255,255,0.05); }
+    .glass-card { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; box-shadow: 0 4px 20px -2px rgba(0,0,0,0.2); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.3); border-radius: 10px; }
+    .blink { animation: blink 1s infinite; }
     @keyframes blink { 50% { opacity: 0.2; } }
-    .card-enter { animation: cardEnter 0.3s ease forwards; }
-    @keyframes cardEnter { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-    .alert-flash { animation: alertFlash 0.4s ease forwards; }
-    @keyframes alertFlash { 0%,100% { background: transparent; } 50% { background: rgba(220,38,38,0.15); } }
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
-    ::-webkit-scrollbar-track { background: #020409; }
-    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
-    ::-webkit-scrollbar-thumb:hover { background: #334155; }
-    .stat-pulse { animation: statPulse 2s ease infinite; }
-    @keyframes statPulse { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
-    .mobile-feed { image-rendering: pixelated; }
-    .risk-bar { transition: width 0.5s ease; }
-    #modal-overlay { backdrop-filter: blur(4px); }
+    .stat-card { position: relative; overflow: hidden; }
+    .stat-card::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 60%); z-index: 0; pointer-events: none; }
   </style>
 </head>
-
-<body class="bg-slate-950 text-slate-100 font-inter text-sm antialiased">
-  <div class="h-screen flex flex-col overflow-hidden">
-
-    <!-- ═══════════════════════════════════════════════════ HEADER ═══ -->
-    <header class="border-b border-slate-800 bg-[#04060e] px-5 py-3 flex items-center justify-between shrink-0 z-20">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 bg-indigo-600 flex items-center justify-center">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square"><rect x="3" y="11" width="18" height="11"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        </div>
-        <div>
-          <h1 class="text-sm font-bold tracking-widest uppercase text-slate-100">Exam Guardian AI</h1>
-          <p class="text-[9px] text-slate-600 font-mono tracking-wider">COMMAND_CENTER // CS-401_FINAL</p>
-        </div>
-        <div class="w-px h-6 bg-slate-800 mx-2"></div>
-        <!-- Live Stats -->
-        <div class="flex items-center gap-4">
-          <div class="text-center">
-            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">ONLINE</div>
-            <div id="stat-online" class="text-sm font-bold font-mono text-emerald-400">0</div>
-          </div>
-          <div class="text-center">
-            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">HIGH RISK</div>
-            <div id="stat-highrisk" class="text-sm font-bold font-mono text-crimson-400">0</div>
-          </div>
-          <div class="text-center">
-            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">ALERTS</div>
-            <div id="stat-alerts" class="text-sm font-bold font-mono text-amber-400">0</div>
-          </div>
-          <div class="text-center">
-            <div class="text-[9px] font-mono text-slate-600 uppercase tracking-widest">TOTAL</div>
-            <div id="stat-total" class="text-sm font-bold font-mono text-slate-300">0</div>
-          </div>
-        </div>
+<body class="text-slate-300 antialiased h-screen flex overflow-hidden">
+  
+  <aside class="w-64 glass-panel shrink-0 flex flex-col z-20">
+    <div class="h-20 flex items-center px-6 border-b border-white/5">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white mr-3">Ex</div>
+      <div>
+        <h1 class="text-sm font-bold text-white tracking-wide">Exam Guardian</h1>
+        <div class="text-[10px] text-indigo-400 font-bold uppercase tracking-wider">Enterprise Console</div>
       </div>
+    </div>
+    <div class="flex-1 overflow-y-auto py-6">
+      <div class="px-6 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Main</div>
+      <nav class="space-y-1 px-4" id="sidebar-nav">
+        <a href="#" onclick="switchTab('dashboard', this)" class="flex items-center px-4 py-2.5 bg-indigo-500/10 text-indigo-300 rounded-lg text-sm font-medium border border-indigo-500/20 nav-link">Dashboard</a>
+        <a href="#" onclick="switchTab('monitoring', this)" class="flex items-center gap-2 px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition nav-link" id="monitoring-nav-link">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 hidden" id="monitoring-live-dot"></span>
+          Live Monitoring
+        </a>
+        <a href="#" onclick="switchTab('students', this)" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition nav-link">Student List</a>
+        <a href="#" onclick="switchTab('sessions', this)" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition nav-link">Exam Sessions</a>
+        <a href="#" onclick="switchTab('requests', this)" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition nav-link">Join Requests</a>
+        <a href="#" onclick="switchTab('review', this)" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition nav-link">Review System</a>
+        <a href="#" onclick="exportReport()" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition">Export Records</a>
+      </nav>
+      <div id="approvals-container" class="hidden px-4 mt-6">
+         <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+            <div class="flex items-center gap-2 mb-2">
+               <div class="w-2 h-2 rounded-full bg-amber-500 blink"></div>
+               <span class="text-xs font-semibold text-amber-500">Pending Access</span>
+            </div>
+            <div id="approvals-list" class="flex flex-col gap-2"></div>
+         </div>
+      </div>
+    </div>
+    <div class="p-4 border-t border-white/5 bg-slate-900/50 flex items-center gap-3">
+      <div class="w-9 h-9 rounded-full bg-indigo-900 border border-indigo-700 flex items-center justify-center text-indigo-300 font-bold text-sm">A</div>
+      <div class="flex-1 overflow-hidden">
+        <div id="admin-name" class="text-xs font-bold text-white truncate">Admin</div>
+        <div id="admin-role" class="text-[10px] text-indigo-400 font-semibold tracking-wider uppercase mt-0.5">Administrator</div>
+      </div>
+      <button onclick="Auth.logout()" class="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg text-sm">Log Out</button>
+    </div>
+  </aside>
 
-      <div class="flex items-center gap-3">
-        <!-- Pending Approvals -->
-        <div id="approvals-container" class="hidden flex items-center bg-amber-950/60 border border-amber-500/40 px-3 py-1.5 gap-3">
-          <div class="w-1.5 h-1.5 bg-amber-400 rounded-full blink"></div>
-          <span class="text-[9px] font-bold text-amber-500 uppercase tracking-widest">Pending Access</span>
-          <div id="approvals-list" class="flex gap-2"></div>
-        </div>
-
-        <!-- Search -->
-        <div class="relative">
-          <input id="search-input" type="text" placeholder="Search student..." class="bg-slate-900 border border-slate-800 text-slate-300 text-xs font-mono px-3 py-1.5 focus:outline-none focus:border-indigo-500 w-44 transition-colors" oninput="filterStudents(this.value)">
-        </div>
-
-        <!-- Export -->
-        <button onclick="exportReport()" class="text-[9px] font-mono tracking-widest bg-emerald-950/50 text-emerald-400 border border-emerald-700/50 hover:border-emerald-500 hover:bg-emerald-900/30 px-3 py-1.5 transition-colors uppercase">
-          ↓ Export Report
-        </button>
-
-        <div class="h-5 w-px bg-slate-800"></div>
-
-        <div class="flex items-center gap-3">
-          <div>
-            <div id="admin-name" class="text-xs font-semibold uppercase text-right">Admin</div>
-            <div class="text-[9px] text-slate-600 font-mono">SYS_NODE_01</div>
-          </div>
-          <button onclick="Auth.logout()" class="text-[9px] font-mono uppercase bg-slate-900 text-slate-500 hover:text-white px-2 py-1.5 border border-slate-800 hover:border-slate-600 transition-colors">Logout</button>
-        </div>
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+    <header class="h-20 flex items-center justify-between px-8 border-b border-white/5 bg-slate-900/20 z-10">
+      <div>
+        <h2 class="text-xl font-bold text-white">Live Monitoring</h2>
+        <div class="text-xs font-medium text-emerald-400 flex items-center gap-2mt-1 mt-1"><div class="w-2 h-2 rounded-full bg-emerald-500"></div> System Active</div>
+      </div>
+      <div class="flex items-center gap-4">
+        <input id="search-input" type="text" placeholder="Search students..." class="bg-slate-900/60 border border-slate-700/80 rounded-full py-2 px-4 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 w-64" oninput="filterStudents(this.value)">
+        <button onclick="document.getElementById('create-exam-modal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded-full px-5 py-2 text-sm shadow-lg shadow-indigo-500/20">New Session</button>
       </div>
     </header>
 
-    <!-- ═══════════════════════════════════════════════════ MAIN ═══ -->
-    <main class="flex-1 flex overflow-hidden">
-
-      <!-- LEFT: MONITORING GRID -->
-      <section class="flex-1 flex flex-col overflow-hidden bg-slate-950">
-        <div class="px-4 py-2.5 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between shrink-0">
+    <main class="flex-1 p-6 overflow-y-auto">
+      <!-- LIVE MONITORING VIEW -->
+      <div id="view-monitoring" class="hidden">
+        <div class="flex justify-between items-center mb-6">
+          <div>
+            <h2 class="text-xl font-bold text-white flex items-center gap-3">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+              Live Monitoring
+            </h2>
+            <p class="text-xs text-slate-400 mt-1">Exam: <span id="monitoring-exam-label" class="text-indigo-400 font-mono font-bold">—</span></p>
+          </div>
           <div class="flex items-center gap-3">
-            <h2 class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Active Monitoring Grid</h2>
-            <div class="w-1.5 h-1.5 bg-emerald-500 rounded-full stat-pulse"></div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-[9px] font-mono text-slate-600" id="grid-sort-label">Sorted by: Risk ↓</span>
-            <button onclick="toggleSort()" class="text-[9px] font-mono text-slate-500 hover:text-slate-300 border border-slate-800 px-2 py-0.5 hover:border-slate-700 transition-colors">SORT</button>
+            <button onclick="toggleSort()" class="bg-slate-800 rounded-lg px-3 py-1 text-[11px] text-slate-300" id="grid-sort-label-mon">Sort: Risk ↓</button>
           </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-4">
-          <div id="student-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            <div class="col-span-full py-24 text-center text-slate-700 font-mono text-xs border border-slate-800 border-dashed" id="grid-empty">
-              <div class="text-2xl mb-3 opacity-30">⊡</div>
-              AWAITING WEBSOCKET CONNECTIONS...
-              <div class="text-[9px] mt-2 text-slate-800">Students will appear here when they join the exam</div>
+        <!-- Stats row -->
+        <div class="grid grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+          <div class="glass-card p-4 stat-card border-t-2 border-t-indigo-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total</span>
+            <div id="mon-stat-total" class="text-2xl font-bold text-white mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-emerald-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Active</span>
+            <div id="mon-stat-active" class="text-2xl font-bold text-emerald-400 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-sky-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Completed</span>
+            <div id="mon-stat-completed" class="text-2xl font-bold text-sky-400 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-slate-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Pending</span>
+            <div id="mon-stat-pending" class="text-2xl font-bold text-slate-400 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-red-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">High Risk</span>
+            <div id="mon-stat-highrisk" class="text-2xl font-bold text-red-500 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-amber-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Alerts</span>
+            <div id="mon-stat-alerts" class="text-2xl font-bold text-amber-400 mt-1">0</div>
+          </div>
+        </div>
+
+        <!-- Grid + Panel -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6" style="height:calc(100vh - 320px); min-height:500px">
+          <div class="lg:col-span-2 flex flex-col h-full">
+            <div class="flex-1 glass-card p-4 overflow-y-auto">
+              <div id="student-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div class="col-span-full py-20 text-center text-slate-500 border border-slate-700/50 border-dashed rounded-xl" id="grid-empty">AWAITING CONNECTIONS</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-4 h-full">
+            <div class="glass-card flex flex-col shrink-0">
+              <div class="p-3 border-b border-white/5 bg-slate-900/30 flex justify-between items-center rounded-t-2xl">
+                <h3 class="text-[11px] font-bold text-white uppercase tracking-wider">Target Insight</h3>
+                <span id="target-id" class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-400 text-[10px] font-bold">NONE</span>
+              </div>
+              <div id="target-details" class="p-4 text-center">
+                <div class="py-6 text-slate-500 border border-slate-700/50 border-dashed rounded-xl">Select a student</div>
+              </div>
+            </div>
+            <div class="glass-card flex-1 flex flex-col overflow-hidden">
+              <div class="p-3 border-b border-white/5 bg-slate-900/30">
+                <div class="flex justify-between items-center mb-1">
+                  <h3 class="text-[11px] font-bold text-white uppercase tracking-wider">Risk Velocity</h3>
+                  <span id="chart-target-label" class="text-[9px] text-slate-500">—</span>
+                </div>
+                <div class="h-24"><canvas id="riskChart"></canvas></div>
+              </div>
+              <div class="p-3 border-b border-white/5 bg-slate-900/30">
+                <div class="flex justify-between items-center mb-2">
+                  <h3 class="text-[11px] font-bold text-white uppercase tracking-wider">Mobile Cam</h3>
+                  <span id="mobile-status-text" class="text-[9px] font-bold text-slate-500">OFFLINE</span>
+                  <div id="mobile-led" class="hidden"></div>
+                </div>
+                <div class="rounded-xl overflow-hidden bg-slate-950/80 aspect-video relative flex items-center justify-center border border-white/5">
+                  <span id="cam2-placeholder" class="text-[10px] text-slate-500">Awaiting Sync</span>
+                  <img id="mobile-cam-feed" class="w-full h-full object-cover absolute top-0 left-0 hidden" src="" alt="Mobile Feed">
+                </div>
+              </div>
+              <div class="flex-1 flex flex-col overflow-hidden bg-slate-900/10">
+                <div class="p-2 bg-slate-900/40 border-b border-white/5 flex justify-between items-center">
+                  <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ledger</h3>
+                  <button onclick="clearLedger()" class="text-[10px] text-slate-500 hover:text-white">CLEAR</button>
+                </div>
+                <div id="violation-ledger" class="flex-1 overflow-y-auto p-2 space-y-1 text-xs"></div>
+              </div>
             </div>
           </div>
         </div>
-      </section>
+      </div>
+      <!-- END LIVE MONITORING VIEW -->
 
-      <!-- RIGHT: INTELLIGENCE PANEL -->
-      <section class="w-[380px] flex flex-col shrink-0 border-l border-slate-800 bg-[#04060e] overflow-y-auto">
-
-        <!-- Target Analysis Header -->
-        <div class="p-4 border-b border-slate-800 shrink-0 bg-black/30">
-          <div class="flex justify-between items-center mb-1">
-            <h2 class="text-[9px] font-bold tracking-widest text-slate-500 uppercase">Target Intel</h2>
-            <div id="target-id" class="text-[9px] font-mono text-indigo-400 bg-indigo-950/50 border border-indigo-800/50 px-2 py-0.5">NONE SELECTED</div>
+      <!-- DASHBOARD VIEW -->
+      <div id="view-dashboard">
+        <div class="grid grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+          <div class="glass-card p-4 stat-card border-t-2 border-t-indigo-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Total Users</span>
+            <div id="stat-total" class="text-2xl font-bold text-white mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-emerald-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Active</span>
+            <div id="stat-online" class="text-2xl font-bold text-emerald-400 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-sky-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Completed</span>
+            <div id="stat-completed" class="text-2xl font-bold text-sky-400 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-slate-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Pending</span>
+            <div id="stat-pending" class="text-2xl font-bold text-slate-400 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-red-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">High Risk</span>
+            <div id="stat-highrisk" class="text-2xl font-bold text-red-500 mt-1">0</div>
+          </div>
+          <div class="glass-card p-4 stat-card border-t-2 border-t-violet-500">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Exams Created</span>
+            <div id="stat-exams-created" class="text-2xl font-bold text-violet-400 mt-1">0</div>
           </div>
         </div>
 
-        <!-- Target Details -->
-        <div id="target-details" class="p-4 border-b border-slate-800 shrink-0">
-          <div class="flex flex-col items-center justify-center py-8 text-slate-700 border border-slate-800 border-dashed">
-            <div class="text-lg opacity-20 mb-2">◼</div>
-            <span class="text-[10px] font-mono uppercase tracking-wider">Select a student from the grid</span>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <div class="glass-card p-5 flex items-center justify-between">
+            <div>
+              <div class="text-xs text-slate-400 mb-1">Current Active Session</div>
+              <div class="text-white font-bold" id="dash-active-exam">No session active</div>
+            </div>
+            <button onclick="switchTabById('monitoring')" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold transition shadow-lg shadow-indigo-500/20">→ Go Live</button>
           </div>
-        </div>
-
-        <!-- Risk Graph -->
-        <div class="border-b border-slate-800 p-3 shrink-0 bg-black/20">
-          <div class="flex justify-between items-center mb-2">
-            <h2 class="text-[9px] font-bold tracking-widest text-slate-600 uppercase">Risk Velocity</h2>
-            <span id="chart-target-label" class="text-[9px] font-mono text-slate-700">—</span>
-          </div>
-          <div class="h-24 relative">
-            <canvas id="riskChart"></canvas>
-          </div>
-        </div>
-
-        <!-- Secondary Camera Feed -->
-        <div class="border-b border-slate-800 p-3 shrink-0 bg-black/20">
-          <div class="flex justify-between items-center mb-2">
-            <h2 class="text-[9px] font-bold tracking-widest text-slate-600 uppercase">2nd Camera (Mobile)</h2>
-            <div class="flex items-center gap-1.5">
-              <div id="mobile-led" class="w-1.5 h-1.5 rounded-full bg-slate-700"></div>
-              <span id="mobile-status-text" class="text-[9px] font-mono text-slate-700 uppercase">OFFLINE</span>
+          <div class="glass-card p-5">
+            <div class="text-xs text-slate-400 mb-2">Quick Actions</div>
+            <div class="flex gap-2 flex-wrap">
+              <button onclick="document.getElementById('create-exam-modal').classList.remove('hidden')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition">+ New Session</button>
+              <button onclick="switchTabById('sessions')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition">Exam Sessions</button>
+              <button onclick="switchTabById('requests')" class="px-3 py-1.5 bg-amber-900/40 hover:bg-amber-800/50 text-amber-400 rounded-lg text-xs font-semibold transition">Join Requests</button>
             </div>
           </div>
-          <div class="relative bg-black border border-slate-800 aspect-video flex items-center justify-center overflow-hidden">
-            <span id="cam2-placeholder" class="text-[9px] text-slate-700 font-mono uppercase tracking-widest">Awaiting Mobile Sync...</span>
-            <img id="mobile-cam-feed" class="mobile-feed w-full h-full object-cover absolute inset-0 hidden" src="" alt="Mobile feed">
-          </div>
         </div>
 
-        <!-- Live Event Ledger -->
-        <div class="flex-1 flex flex-col overflow-hidden">
-          <div class="px-3 py-2 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between shrink-0 sticky top-0">
-            <h2 class="text-[9px] font-bold tracking-widest text-slate-500 uppercase">System Ledger</h2>
-            <button onclick="clearLedger()" class="text-[8px] font-mono text-slate-700 hover:text-slate-400 uppercase tracking-widest">CLEAR</button>
+        <!-- Student Activity Table -->
+        <div class="mt-2">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="text-sm font-bold text-white">Student Activity</h3>
+            <div class="flex gap-2 text-[11px] font-semibold">
+              <span class="px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-400"><span id="act-active">0</span> Active</span>
+              <span class="px-2 py-1 rounded-md bg-sky-500/10 text-sky-400"><span id="act-completed">0</span> Completed</span>
+              <span class="px-2 py-1 rounded-md bg-slate-700/50 text-slate-400"><span id="act-pending">0</span> Pending</span>
+            </div>
           </div>
-          <div class="flex-1 overflow-y-auto p-2 bg-[#02040a]" id="violation-ledger">
-            <div class="text-[9px] font-mono text-slate-700 p-2">// Waiting for events...</div>
+          <div class="glass-card overflow-hidden">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-white/5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="text-left px-4 py-3">Student</th>
+                  <th class="text-left px-4 py-3">Status</th>
+                  <th class="text-left px-4 py-3">Risk Score</th>
+                  <th class="text-left px-4 py-3">AI Cheat Prob.</th>
+                  <th class="text-left px-4 py-3">Events</th>
+                  <th class="text-left px-4 py-3">Exam ID</th>
+                </tr>
+              </thead>
+              <tbody id="activity-table-body">
+                <tr><td colspan="6" class="text-center py-10 text-slate-600 text-sm">No students connected yet</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
-      </section>
+      </div> <!-- END DASHBOARD VIEW -->
+
+      <!-- EXAM SESSIONS VIEW -->
+      <div id="view-sessions" class="hidden">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-xl font-bold text-white">Exam Sessions</h2>
+          <button onclick="document.getElementById('create-exam-modal').classList.remove('hidden')" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded-full px-5 py-2 text-sm shadow-lg shadow-indigo-500/20">+ Create Session</button>
+        </div>
+        <div class="glass-card overflow-hidden">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-white/5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="text-left px-4 py-3">Exam Title</th>
+                <th class="text-left px-4 py-3">Exam ID</th>
+                <th class="text-left px-4 py-3">Duration</th>
+                <th class="text-left px-4 py-3">Status</th>
+                <th class="text-left px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sessions-table-body">
+              <tr><td colspan="5" class="text-center py-10 text-slate-600 text-sm">No exam sessions created yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div> <!-- END EXAM SESSIONS -->
+
+      <!-- JOIN REQUESTS VIEW -->
+      <div id="view-requests" class="hidden">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-xl font-bold text-white">Student Join Requests</h2>
+          <div class="text-sm text-slate-400">Manage pending access to exams</div>
+        </div>
+        
+        <div class="flex gap-4 mb-4">
+          <button class="px-4 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-500 text-sm font-semibold">Pending (0)</button>
+          <button class="px-4 py-1.5 rounded-md bg-emerald-500/10 text-emerald-500 text-sm font-semibold">Accepted</button>
+          <button class="px-4 py-1.5 rounded-md bg-red-500/10 text-red-500 text-sm font-semibold">Rejected</button>
+        </div>
+
+        <div class="glass-card overflow-hidden">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-white/5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="text-left px-4 py-3">Student Name</th>
+                <th class="text-left px-4 py-3">Email</th>
+                <th class="text-left px-4 py-3">Requested Exam ID</th>
+                <th class="text-left px-4 py-3">Status</th>
+                <th class="text-right px-4 py-3">Decision</th>
+              </tr>
+            </thead>
+            <tbody id="requests-table-body">
+              <tr><td colspan="5" class="text-center py-10 text-slate-600 text-sm">No pending join requests.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div> <!-- END JOIN REQUESTS -->
+
+      <!-- STUDENT LIST VIEW -->
+      <div id="view-students" class="hidden">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-xl font-bold text-white">Registered Students</h2>
+          <div class="text-sm text-slate-400 w-64">
+            <input type="text" placeholder="Search registered students..." class="w-full bg-slate-900/60 border border-slate-700/80 rounded-full py-2 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+          </div>
+        </div>
+        <div class="glass-card overflow-hidden">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-white/5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="text-left px-4 py-3">Student Name</th>
+                <th class="text-left px-4 py-3">Email Address</th>
+                <th class="text-left px-4 py-3">Registered Date</th>
+                <th class="text-right px-4 py-3">Exams Taken</th>
+              </tr>
+            </thead>
+            <tbody id="registered-students-body">
+              <tr><td colspan="4" class="text-center py-10 text-slate-600 text-sm">No students found.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div> <!-- END STUDENT LIST -->
+
+      <!-- REVIEW SYSTEM VIEW -->
+      <div id="view-review" class="hidden">
+        <div class="flex justify-between items-center mb-6">
+          <h2 class="text-xl font-bold text-white flex items-center gap-2"><span class="text-red-500">⚠</span> Review System</h2>
+          <div class="text-sm text-slate-400">Review and verify flagged activities</div>
+        </div>
+        <div class="glass-card overflow-hidden">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-white/5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="text-left px-4 py-3">Student Name</th>
+                <th class="text-left px-4 py-3">Activity / Flag</th>
+                <th class="text-left px-4 py-3">Status</th>
+                <th class="text-left px-4 py-3">Timestamp</th>
+                <th class="text-right px-4 py-3">Action</th>
+              </tr>
+            </thead>
+            <tbody id="review-table-body">
+              <tr id="empty-review"><td colspan="5" class="text-center py-10 text-slate-600 text-sm">No activities to review yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div> <!-- END REVIEW SYSTEM -->
+
     </main>
   </div>
 
-  <!-- ═══════════════════════════════════════════════ MESSAGE MODAL ═══ -->
-  <div id="modal-overlay" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center">
-    <div class="w-full max-w-sm border border-slate-700 bg-slate-900 shadow-2xl">
-      <div class="p-4 border-b border-slate-800 flex justify-between items-center">
-        <h3 class="text-xs font-bold uppercase tracking-widest text-slate-300">Send Proctor Warning</h3>
-        <button onclick="closeModal()" class="text-slate-500 hover:text-white font-mono text-lg leading-none">&times;</button>
-      </div>
-      <div class="p-4 space-y-3">
-        <div>
-          <label class="text-[9px] font-mono text-slate-500 uppercase tracking-widest block mb-1">Target Student</label>
-          <div id="modal-target-name" class="text-xs font-mono text-indigo-400 bg-indigo-950/30 border border-indigo-800/40 px-2 py-1.5"></div>
-        </div>
-        <div>
-          <label class="text-[9px] font-mono text-slate-500 uppercase tracking-widest block mb-1">Warning Message</label>
-          <textarea id="modal-message" placeholder="e.g. Please look at your screen and keep hands visible." class="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs font-mono p-2 h-20 resize-none focus:outline-none focus:border-indigo-500 transition-colors"></textarea>
-        </div>
-        <div class="flex gap-2">
-          <button onclick="sendWarning()" class="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-mono text-xs py-2 uppercase tracking-widest border border-amber-400 transition-colors">Send Warning</button>
-          <button onclick="closeModal()" class="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs py-2 border border-slate-700 transition-colors">Cancel</button>
-        </div>
+  <div id="modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+    <div class="glass-card w-full max-w-sm p-6 relative">
+      <button onclick="closeModal()" class="absolute top-4 right-4 text-slate-400">X</button>
+      <h3 class="text-lg font-bold text-white mb-4">Send Warning</h3>
+      <div id="modal-target-name" class="inline-block px-3 py-1 mb-4 rounded-lg bg-indigo-500/20 text-indigo-400 font-semibold text-xs"></div>
+      <textarea id="modal-message" placeholder="Type warning..." class="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl p-3 text-sm text-slate-200 mb-4 h-24 focus:outline-none"></textarea>
+      <div class="flex gap-2">
+        <button onclick="sendWarning()" class="flex-1 bg-amber-600 text-white rounded-xl py-2">Send</button>
+        <button onclick="closeModal()" class="px-4 bg-slate-800 text-white rounded-xl py-2">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════ EXPORT MODAL ═══ -->
-  <div id="export-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-    <div class="w-full max-w-2xl border border-slate-700 bg-slate-900 shadow-2xl max-h-[80vh] flex flex-col">
-      <div class="p-4 border-b border-slate-800 flex justify-between items-center shrink-0">
-        <h3 class="text-xs font-bold uppercase tracking-widest text-emerald-400">Intelligence Report — CS-401_FINAL</h3>
-        <div class="flex items-center gap-3">
-          <button onclick="downloadReport()" class="text-[9px] font-mono bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 px-3 py-1.5 hover:bg-emerald-800/40 transition-colors uppercase">↓ Download JSON</button>
-          <button onclick="closeExportModal()" class="text-slate-500 hover:text-white font-mono text-lg leading-none">&times;</button>
-        </div>
+  <div id="export-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
+    <div class="glass-card w-full max-w-2xl max-h-[85vh] flex flex-col">
+      <div class="p-4 border-b border-slate-700/50 flex justify-between items-center">
+        <h3 class="text-lg font-bold text-emerald-400">Export Report</h3>
+        <button onclick="downloadReport()" class="bg-emerald-500/20 text-emerald-400 rounded-lg px-4 py-2 text-sm">Download</button>
+        <button onclick="closeExportModal()" class="text-slate-400 pl-4">X</button>
       </div>
       <div class="flex-1 overflow-y-auto p-4" id="export-content"></div>
     </div>
   </div>
 
+  <div id="create-exam-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
+    <div class="glass-card w-full max-w-md p-6 relative">
+      <button onclick="document.getElementById('create-exam-modal').classList.add('hidden')" class="absolute top-4 right-4 text-slate-400">X</button>
+      <h3 class="text-lg font-bold text-white mb-4">New Exam Session</h3>
+      <div class="space-y-3">
+        <input type="text" id="exam-title-input" placeholder="Title" class="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl p-3 text-sm">
+        <input type="text" id="exam-id-input" placeholder="Access Code (e.g. CS101)" class="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl p-3 text-sm uppercase">
+        <div class="grid grid-cols-2 gap-3">
+          <input type="date" id="exam-date-input" class="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl p-3 text-sm">
+          <input type="time" id="exam-time-input" class="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl p-3 text-sm">
+        </div>
+        <input type="number" id="exam-duration-input" value="90" placeholder="Duration (min)" class="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl p-3 text-sm">
+        <button onclick="initializeExam(); document.getElementById('create-exam-modal').classList.add('hidden');" class="w-full bg-indigo-600 text-white rounded-xl py-3 mt-2">Start Session</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/auth.js"></script>
   <script src="js/admin-logic.js"></script>
+  <script>
+    const ALL_VIEWS = ['view-dashboard', 'view-monitoring', 'view-sessions', 'view-requests', 'view-students', 'view-review'];
+
+    function switchTab(tabId, el) {
+      ALL_VIEWS.forEach(id => document.getElementById(id).classList.add('hidden'));
+      document.getElementById('view-' + tabId).classList.remove('hidden');
+
+      if (tabId === 'students') renderRegisteredStudents();
+      if (tabId === 'monitoring') {
+        syncMonitoringStats();
+        // Initialize chart lazily (canvas was hidden at load time)
+        if (typeof window.ensureChartInit === 'function') window.ensureChartInit();
+      }
+
+      if (el) {
+        document.querySelectorAll('#sidebar-nav .nav-link').forEach(link => {
+          link.classList.remove('bg-indigo-500/10', 'text-indigo-300', 'border-indigo-500/20', 'border');
+          link.classList.add('text-slate-400');
+        });
+        el.classList.remove('text-slate-400');
+        el.classList.add('bg-indigo-500/10', 'text-indigo-300', 'border', 'border-indigo-500/20');
+      }
+    }
+
+    // Programmatic tab switch (no element reference needed)
+    function switchTabById(tabId) {
+      const link = document.querySelector(`#sidebar-nav .nav-link[onclick*="'${tabId}'"]`);
+      switchTab(tabId, link);
+    }
+
+    // Populate Student List from localStorage-registered users
+    function renderRegisteredStudents() {
+      const tbody = document.getElementById('registered-students-body');
+      if (!tbody) return;
+      const students = typeof Auth !== 'undefined' ? Auth.getAllStudents() : [];
+      if (students.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10 text-slate-600 text-sm">No students registered yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = students.map(s => {
+        const isOnline = typeof activeStudents !== 'undefined' && activeStudents.has(s.id);
+        const onlineBadge = isOnline
+          ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><span class="w-1 h-1 bg-emerald-400 rounded-full animate-pulse inline-block"></span>Online</span>'
+          : '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-slate-700/40 text-slate-400 border border-slate-600/30">Offline</span>';
+        return `
+          <tr class="border-b border-white/5 hover:bg-white/[0.02] transition">
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-indigo-900 border border-indigo-700 flex items-center justify-center text-indigo-300 font-bold text-xs">${(s.name||'S').charAt(0).toUpperCase()}</div>
+                <div>
+                  <div class="font-semibold text-white text-sm">${s.name}</div>
+                  <div class="text-[11px] text-slate-500 font-mono">${s.rollNo || s.id}</div>
+                </div>
+              </div>
+            </td>
+            <td class="px-4 py-3 text-slate-400 text-sm">${s.email}</td>
+            <td class="px-4 py-3">${onlineBadge}</td>
+            <td class="px-4 py-3 text-right"><span class="text-slate-500 text-sm">${s.dept || 'General'}</span></td>
+          </tr>`;
+      }).join('');
+    }
+
+    // Mirror key stats into monitoring view
+    function syncMonitoringStats() {
+      const ids = ['total','online','completed','pending','highrisk'];
+      ids.forEach(k => {
+        const src = document.getElementById('stat-' + k);
+        const dst = document.getElementById('mon-stat-' + (k === 'online' ? 'active' : k));
+        if (src && dst) dst.textContent = src.textContent;
+      });
+      const alertEl = document.getElementById('stat-alerts');
+      const monAlert = document.getElementById('mon-stat-alerts');
+      if (alertEl && monAlert) monAlert.textContent = alertEl.textContent;
+
+      // Update monitoring exam label
+      const lbl = document.getElementById('monitoring-exam-label');
+      if (lbl) lbl.textContent = (typeof examId !== 'undefined' && examId) ? examId : '—';
+    }
+  </script>
 </body>
 </html>

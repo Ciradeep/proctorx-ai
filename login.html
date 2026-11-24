@@ -3,112 +3,360 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Exam Guardian - Authentication</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <title>Exam Guardian - Sign In</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            inter: ['Inter', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          },
-          colors: {
-             crimson: { 500: '#ef4444', 600: '#dc2626' }
-          }
-        }
-      }
-    }
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Outfit', 'sans-serif'] } } } }
   </script>
+  <!-- Firebase SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <!-- Google Identity Services (for One-Tap) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font-family: 'Outfit', sans-serif; background-color: #0b1121; }
+    .bg-gradient-anim {
+      position: fixed; inset: 0; z-index: 0;
+      background: radial-gradient(ellipse at 20% 20%, rgba(99,102,241,0.18) 0%, transparent 55%),
+                  radial-gradient(ellipse at 80% 80%, rgba(16,185,129,0.12) 0%, transparent 55%),
+                  radial-gradient(ellipse at 60% 10%, rgba(139,92,246,0.12) 0%, transparent 45%);
+    }
+    .grid-overlay {
+      position: fixed; inset: 0; z-index: 0;
+      background-image: linear-gradient(rgba(99,102,241,0.04) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(99,102,241,0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.80);
+      backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 24px;
+      box-shadow: 0 25px 60px -12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03) inset;
+    }
+    .google-btn {
+      background: #fff; color: #1f2937;
+      border: 1.5px solid rgba(0,0,0,0.08);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      width: 100%; padding: 13px 20px;
+      font-size: 15px; font-weight: 600; font-family: 'Outfit', sans-serif;
+      cursor: pointer; transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .google-btn:hover { background: #f9fafb; box-shadow: 0 4px 18px rgba(0,0,0,0.2); transform: translateY(-1px); }
+    .google-btn:active { transform: translateY(0); }
+    .google-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+    .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.07); }
+    .divider span { font-size: 11px; color: #475569; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+    .inp {
+      width: 100%; background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.08);
+      border-radius: 12px; padding: 13px 16px; font-size: 14px; color: #e2e8f0;
+      font-family: 'Outfit', sans-serif; outline: none; transition: all 0.2s;
+    }
+    .inp:focus { border-color: rgba(99,102,241,0.6); background: rgba(99,102,241,0.05); box-shadow: 0 0 0 4px rgba(99,102,241,0.1); }
+    .inp::placeholder { color: #475569; }
+    .submit-btn {
+      width: 100%; padding: 13px; border-radius: 12px; font-size: 15px; font-weight: 600;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; border: none;
+      cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 20px rgba(99,102,241,0.35);
+      font-family: 'Outfit', sans-serif;
+    }
+    .submit-btn:hover { box-shadow: 0 6px 28px rgba(99,102,241,0.5); transform: translateY(-1px); }
+    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .role-chip {
+      padding: 9px 14px; border-radius: 10px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; border: 1.5px solid; text-align: center;
+    }
+    .spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+    .google-spinner { width: 18px; height: 18px; border: 2px solid rgba(99,102,241,0.3); border-top-color: #6366f1; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #error-box { background: rgba(239,68,68,0.1); border: 1.5px solid rgba(239,68,68,0.3); border-radius: 12px; }
+    #success-box { background: rgba(16,185,129,0.1); border: 1.5px solid rgba(16,185,129,0.3); border-radius: 12px; }
+    #firebase-banner { background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1)); border: 1px solid rgba(99,102,241,0.3); border-radius: 12px; }
+    .tab-btn { padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #64748b; }
+    .tab-btn.active { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+  </style>
 </head>
-<body class="bg-slate-950 text-slate-100 font-inter text-sm antialiased h-screen flex items-center justify-center p-4">
+<body class="min-h-screen flex items-center justify-center p-4 py-12 relative overflow-x-hidden text-slate-200 overflow-y-auto">
 
-  <div class="relative w-full max-w-md">
-    <!-- Login Card -->
-    <div class="border border-slate-800 bg-slate-900 shadow-2xl z-10 relative">
-      <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-black/20">
-        <div>
-          <h1 class="text-xl font-bold uppercase tracking-widest">Exam Guardian</h1>
-          <div class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-1">Access Terminal</div>
+  <div class="bg-gradient-anim"></div>
+  <div class="grid-overlay"></div>
+
+  <div class="relative z-10 w-full max-w-md">
+
+    <!-- Logo + Brand -->
+    <div class="text-center mb-8">
+      <div class="relative inline-flex items-center justify-center mb-5">
+        <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-700 flex items-center justify-center shadow-2xl shadow-indigo-500/40 text-white">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
         </div>
-        <div class="w-2 h-2 bg-emerald-500 animate-pulse"></div>
       </div>
-      
-      <div class="p-8">
-        <form id="login-form" class="space-y-6">
-          <div id="error-box" class="hidden bg-crimson-500/10 border border-crimson-500/50 text-crimson-500 p-3 text-xs font-mono mb-4">
-             // ERROR: Invalid credentials
-          </div>
+      <h1 class="text-3xl font-bold text-white tracking-tight">Exam Guardian</h1>
+      <p class="text-slate-400 mt-1.5 text-sm">AI-powered secure examination platform</p>
+    </div>
 
+    <div class="glass-card p-8">
+
+      <!-- Firebase setup banner (shown if not configured) -->
+      <div id="firebase-banner" class="hidden p-4 mb-6">
+        <div class="flex gap-3 items-start">
+          <span class="text-indigo-400 text-lg shrink-0">🔥</span>
           <div>
-            <label class="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2">Identifier (Email)</label>
-            <input type="email" id="email" value="arjun@student.edu" required class="w-full bg-slate-950 border border-slate-700 text-slate-100 px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-mono rounded-none">
+            <p class="text-indigo-300 font-semibold text-sm mb-1">Firebase not configured</p>
+            <p class="text-slate-400 text-xs leading-relaxed">Running in demo mode. Fill in <code class="bg-indigo-500/20 px-1 rounded text-indigo-300">js/firebase-config.js</code> to enable real accounts. Demo logins still work below.</p>
           </div>
-          
-          <div>
-            <label class="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2">Access Key (Password)</label>
-            <input type="password" id="password" value="student123" required class="w-full bg-slate-950 border border-slate-700 text-slate-100 px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-mono rounded-none">
-          </div>
-
-          <div class="flex gap-4 pt-4">
-             <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-sm px-4 py-3 uppercase tracking-widest border border-indigo-400 transition-colors">
-               AUTHENTICATE
-             </button>
-          </div>
-        </form>
-
-        <div class="mt-8 border-t border-slate-800 pt-6">
-           <h3 class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3">System Roles Demo:</h3>
-           <div class="grid grid-cols-2 gap-3">
-              <button onclick="fillAdmin()" class="border border-slate-700 hover:border-slate-500 bg-slate-950 px-3 py-2 text-[10px] font-mono text-slate-400 uppercase tracking-widest transition-colors text-left">
-                 [Load Admin]<br>admin@exam.edu
-              </button>
-              <button onclick="fillStudent()" class="border border-slate-700 hover:border-slate-500 bg-slate-950 px-3 py-2 text-[10px] font-mono text-slate-400 uppercase tracking-widest transition-colors text-left">
-                 [Load Student]<br>arjun@student.edu
-              </button>
-           </div>
         </div>
+      </div>
 
+      <!-- Error / Success boxes -->
+      <div id="error-box" class="hidden py-3 px-4 mb-5 flex items-center gap-3 text-red-400 text-sm">
+        <span>⚠</span><span id="error-text"></span>
+      </div>
+      <div id="success-box" class="hidden py-3 px-4 mb-5 flex items-center gap-3 text-emerald-400 text-sm">
+        <span>✓</span><span id="success-text"></span>
+      </div>
+
+      <!-- Google Sign-In / Sign-Up button -->
+      <button id="google-btn" class="google-btn" onclick="handleGoogleAuth()">
+        <svg width="20" height="20" viewBox="0 0 48 48">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        <span id="google-btn-label">Continue with Google</span>
+      </button>
+
+      <p class="text-center text-[11px] text-slate-500 mt-2">Signs in <strong class="text-slate-400">or</strong> creates your account automatically</p>
+
+      <div class="divider mt-5"><span>or continue with email</span></div>
+
+      <!-- Sign In / Sign Up Tab Toggle -->
+      <div class="flex gap-1 bg-slate-900/50 p-1 rounded-xl mb-5">
+        <button id="tab-signin" class="tab-btn active flex-1" onclick="switchTab('signin')">Sign In</button>
+        <button id="tab-signup" class="tab-btn flex-1" onclick="switchTab('signup')">Create Account</button>
+      </div>
+
+      <!-- Sign In Form -->
+      <form id="signin-form" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Email</label>
+          <input type="email" id="signin-email" placeholder="you@domain.com" required class="inp">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Password</label>
+          <div class="relative flex items-center">
+            <input type="password" id="signin-password" placeholder="••••••••" required class="inp pr-10">
+            <button type="button" onclick="togglePass('signin-password')" class="absolute right-3 text-slate-400 hover:text-slate-200 focus:outline-none">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Sign in as</label>
+          <select id="signin-role" class="inp">
+            <option value="student">🎓 Student</option>
+            <option value="admin">🛡 Administrator</option>
+          </select>
+        </div>
+        <button type="submit" id="signin-btn" class="submit-btn mt-2">Sign In</button>
+      </form>
+
+      <!-- Sign Up Form (hidden by default) -->
+      <form id="signup-form" class="hidden space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Full Name</label>
+          <input type="text" id="signup-name" placeholder="Your full name" required class="inp">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Email</label>
+          <input type="email" id="signup-email" placeholder="you@domain.com" required class="inp">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Password</label>
+          <div class="relative flex items-center">
+            <input type="password" id="signup-password" placeholder="Min. 6 characters" required class="inp pr-10">
+            <button type="button" onclick="togglePass('signup-password')" class="absolute right-3 text-slate-400 hover:text-slate-200 focus:outline-none">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Role</label>
+          <select id="signup-role" class="inp">
+            <option value="student">🎓 Student (Examinee)</option>
+            <option value="admin">🛡 Administrator (Proctor)</option>
+          </select>
+        </div>
+        <button type="submit" id="signup-btn" class="submit-btn">Create Account</button>
+      </form>
+
+      <!-- Demo Quick-Fill (only visible in sign-in tab) -->
+      <div id="demo-section" class="mt-6 pt-5 border-t border-white/[0.06]">
+        <p class="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Demo Accounts</p>
+        <div class="grid grid-cols-2 gap-3">
+          <button onclick="fillAdmin()" class="role-chip bg-indigo-500/10 border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/20">🛡 Admin</button>
+          <button onclick="fillStudent()" class="role-chip bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20">🎓 Student</button>
+        </div>
       </div>
     </div>
-    
-    <!-- Decorative background elements -->
-    <div class="absolute -top-4 -left-4 w-12 h-12 border-t-2 border-l-2 border-indigo-500/30 pointer-events-none"></div>
-    <div class="absolute -bottom-4 -right-4 w-12 h-12 border-b-2 border-r-2 border-indigo-500/30 pointer-events-none"></div>
+
+    <p class="text-center mt-6 text-xs text-slate-600">Your session is encrypted end-to-end · Exam Guardian © 2026</p>
   </div>
 
+  <!-- Load Firebase config, then Auth module -->
+  <script src="js/firebase-config.js"></script>
   <script src="js/auth.js"></script>
   <script>
-    // FORCE CLEAR SESSION if they visit the login page, allowing easy switching
-    sessionStorage.removeItem('eg_session');
+    // ── Show Firebase banner if not configured ───────────────────
+    if (typeof EG_FIREBASE_CONFIGURED === 'undefined' || !EG_FIREBASE_CONFIGURED) {
+      document.getElementById('firebase-banner').classList.remove('hidden');
+    }
 
-    document.getElementById('login-form').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const email = document.getElementById('email').value;
-      const pass = document.getElementById('password').value;
-      const errBox = document.getElementById('error-box');
-      
-      const res = Auth.login(email, pass);
-      if (res.success) {
-        errBox.classList.add('hidden');
-        window.location.href = res.role === 'admin' ? 'admin-dashboard.html' : 'index.html';
+    // ── Tab switching ────────────────────────────────────────────
+    function switchTab(tab) {
+      const isSignIn = tab === 'signin';
+      document.getElementById('signin-form').classList.toggle('hidden', !isSignIn);
+      document.getElementById('signup-form').classList.toggle('hidden', isSignIn);
+      document.getElementById('demo-section').classList.toggle('hidden', !isSignIn);
+      document.getElementById('tab-signin').classList.toggle('active', isSignIn);
+      document.getElementById('tab-signup').classList.toggle('active', !isSignIn);
+      hideMessages();
+    }
+
+    // ── Toggle Password Visibility ─────────────────────────────
+    function togglePass(inputId) {
+      const input = document.getElementById(inputId);
+      if (input.type === 'password') {
+        input.type = 'text';
       } else {
-        errBox.textContent = `// ERROR: ${res.error}`;
-        errBox.classList.remove('hidden');
+        input.type = 'password';
+      }
+    }
+
+    // ── Check for Redirect Result on Load ─────────────────────────
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (typeof Auth !== 'undefined' && Auth.firebaseReady) {
+        setGoogleLoading(true);
+        const res = await Auth.checkRedirectResult();
+        if (res && res.success) {
+          showSuccess('Welcome, ' + res.user.name + '! Redirecting...');
+          setTimeout(() => redirectUser(res.role), 800);
+        } else if (res && res.error) {
+          showError(res.error);
+          setGoogleLoading(false);
+        } else {
+          setGoogleLoading(false);
+        }
       }
     });
 
-    function fillAdmin() {
-       document.getElementById('email').value = 'admin@exam.edu';
-       document.getElementById('password').value = 'admin123';
+    // ── Google Sign-In / Create Account ─────────────────────────
+    async function handleGoogleAuth() {
+      hideMessages();
+      setGoogleLoading(true);
+      const res = await Auth.loginWithGoogle();
+      if (res.pendingRedirect) {
+        // Page is redirecting, keep button in loading state
+        return;
+      }
+      setGoogleLoading(false);
+      if (res.success) {
+        showSuccess('Welcome, ' + res.user.name + '! Redirecting...');
+        setTimeout(() => redirectUser(res.role), 800);
+      } else if (res.error) {
+        showError(res.error);
+      }
     }
-    
+
+    // ── Sign In form ─────────────────────────────────────────────
+    document.getElementById('signin-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideMessages();
+      const email = document.getElementById('signin-email').value.trim();
+      const pass  = document.getElementById('signin-password').value;
+      const role  = document.getElementById('signin-role').value;
+      const btn   = document.getElementById('signin-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Signing in...';
+
+      const res = await Auth.loginWithEmail(email, pass, role);
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+
+      if (res.success) {
+        showSuccess('Welcome back, ' + res.user.name + '!');
+        setTimeout(() => redirectUser(res.role), 700);
+      } else {
+        showError(res.error);
+      }
+    });
+
+    // ── Sign Up form ─────────────────────────────────────────────
+    document.getElementById('signup-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideMessages();
+      const name  = document.getElementById('signup-name').value.trim();
+      const email = document.getElementById('signup-email').value.trim();
+      const pass  = document.getElementById('signup-password').value;
+      const role  = document.getElementById('signup-role').value;
+      const btn   = document.getElementById('signup-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Creating account...';
+
+      const res = await Auth.registerWithEmail(name, email, pass, role);
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
+
+      if (res.success) {
+        showSuccess('Account created! Welcome, ' + res.user.name + '!');
+        setTimeout(() => redirectUser(res.role), 800);
+      } else {
+        showError(res.error);
+      }
+    });
+
+    // ── Demo quick-fill ───────────────────────────────────────────
+    function fillAdmin() {
+      document.getElementById('signin-email').value    = 'admin@exam.edu';
+      document.getElementById('signin-password').value = 'admin123';
+      hideMessages();
+    }
     function fillStudent() {
-       const students = Auth.getAllStudents();
-       const random = students[Math.floor(Math.random() * students.length)];
-       document.getElementById('email').value = random.email;
-       document.getElementById('password').value = random.password;
+      document.getElementById('signin-email').value    = 'arjun@student.edu';
+      document.getElementById('signin-password').value = 'student123';
+      hideMessages();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────
+    function redirectUser(role) {
+      window.location.href = role === 'admin' ? 'admin-dashboard.html' : 'student-dashboard.html';
+    }
+    function showError(msg) {
+      if (!msg) return;
+      document.getElementById('error-text').textContent = msg;
+      document.getElementById('error-box').classList.remove('hidden');
+      document.getElementById('success-box').classList.add('hidden');
+    }
+    function showSuccess(msg) {
+      document.getElementById('success-text').textContent = msg;
+      document.getElementById('success-box').classList.remove('hidden');
+      document.getElementById('error-box').classList.add('hidden');
+    }
+    function hideMessages() {
+      document.getElementById('error-box').classList.add('hidden');
+      document.getElementById('success-box').classList.add('hidden');
+    }
+    function setGoogleLoading(on) {
+      const btn   = document.getElementById('google-btn');
+      const label = document.getElementById('google-btn-label');
+      btn.disabled = on;
+      label.innerHTML = on ? '<span class="google-spinner"></span> Connecting...' : 'Continue with Google';
     }
   </script>
 </body>

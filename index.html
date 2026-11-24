@@ -3,641 +3,267 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Exam Guardian - Secure Examination</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <title>Exam Guardian - AI Proctoring Engine</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: { inter: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
-          colors: { crimson: { 400: '#f87171', 500: '#ef4444', 600: '#dc2626', 950: '#1a0000' } }
+          fontFamily: {
+            inter: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          animation: {
+            'blob': "blob 7s infinite",
+            'grid-flow': 'gridFlow 20s linear infinite',
+            'float': 'float 6s ease-in-out infinite',
+          },
+          keyframes: {
+            blob: {
+              "0%": { transform: "translate(0px, 0px) scale(1)" },
+              "33%": { transform: "translate(30px, -50px) scale(1.1)" },
+              "66%": { transform: "translate(-20px, 20px) scale(0.9)" },
+              "100%": { transform: "translate(0px, 0px) scale(1)" }
+            },
+            gridFlow: {
+              "0%": { backgroundPosition: "0 0" },
+              "100%": { backgroundPosition: "50px 50px" }
+            },
+            float: {
+              "0%, 100%": { transform: "translateY(0)" },
+              "50%": { transform: "translateY(-10px)" }
+            }
+          }
         }
       }
     }
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
-    .blink { animation: blink 0.8s step-end infinite; }
-    @keyframes blink { 50% { opacity: 0.2; } }
-    .option-btn { transition: all 0.15s ease; }
-    .option-btn:hover { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.6); }
-    .option-btn.selected { background: rgba(99,102,241,0.25); border-color: #6366f1; color: #c7d2fe; }
-    .option-btn.correct { background: rgba(16,185,129,0.2); border-color: #10b981; color: #a7f3d0; }
-    .option-btn.wrong { background: rgba(220,38,38,0.2); border-color: #dc2626; color: #fca5a5; }
-    #admin-warning { animation: slideDown 0.4s ease; }
-    @keyframes slideDown { from { transform: translateY(-100%); opacity:0; } to { transform: translateY(0); opacity:1; } }
-    ::-webkit-scrollbar { width: 4px; }
-    ::-webkit-scrollbar-track { background: #0f172a; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+    body {
+      background-color: #020617; /* slate-950 */
+      color: #f8fafc;
+    }
+    
+    .bg-grid {
+      background-image: linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 50px 50px;
+    }
+
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.6); /* slate-900 with opacity */
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .text-gradient {
+      background: linear-gradient(135deg, #818cf8 0%, #34d399 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .feature-card {
+      transition: all 0.3s ease;
+    }
+    .feature-card:hover {
+      transform: translateY(-5px);
+      border-color: rgba(129, 140, 248, 0.4);
+      background: rgba(30, 41, 59, 0.8);
+      box-shadow: 0 10px 30px -10px rgba(129, 140, 248, 0.2);
+    }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 font-inter text-sm antialiased flex flex-col h-screen overflow-hidden">
+<body class="font-inter antialiased min-h-screen relative overflow-x-hidden selection:bg-indigo-500/30">
 
-  <!-- ADMIN WARNING BANNER (hidden by default) -->
-  <div id="admin-warning" class="hidden shrink-0 bg-amber-900/80 border-b-2 border-amber-500 px-6 py-2 flex items-center gap-3 z-50">
-    <div class="w-2 h-2 bg-amber-400 rounded-full blink"></div>
-    <span class="text-[11px] font-mono text-amber-300 uppercase tracking-widest font-bold">PROCTOR ALERT:</span>
-    <span id="warning-text" class="text-xs text-amber-100 font-mono"></span>
+  <!-- BACKGROUND ELEMENTS -->
+  <div class="fixed inset-0 z-0 pointer-events-none">
+    <div class="absolute inset-0 bg-grid animate-grid-flow"></div>
+    <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/20 rounded-full blur-[120px] animate-blob"></div>
+    <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-600/10 rounded-full blur-[120px] animate-blob animation-delay-2000"></div>
+    <div class="absolute inset-0 bg-slate-950/80 mask-image-radial-gradient"></div>
   </div>
 
-  <!-- TOP STATUS BAR -->
-  <div class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 shrink-0">
-    <div class="flex items-center gap-3">
-       <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">EXAM_SESSION:</span>
-       <span class="text-xs font-mono text-emerald-500 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5">CS-401_FINAL</span>
-       <div class="w-px h-4 bg-slate-800"></div>
-       <span id="student-id-display" class="text-[10px] font-mono text-slate-500 uppercase tracking-wider"></span>
+  <!-- NAVIGATION -->
+  <nav class="relative z-50 border-b border-slate-800 bg-slate-950/50 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="relative flex h-8 w-8 items-center justify-center border border-indigo-500 bg-indigo-500/10">
+          <div class="absolute inset-0 bg-indigo-500 blur-sm opacity-50"></div>
+          <svg class="w-4 h-4 text-indigo-400 relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="square" stroke-linejoin="miter" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+        </div>
+        <span class="font-bold text-lg tracking-widest uppercase">Exam<span class="text-indigo-400">Guardian</span></span>
+      </div>
+      <div class="flex items-center gap-6 font-mono text-xs">
+        <a href="#features" class="text-slate-400 hover:text-white transition-colors uppercase tracking-widest hidden md:block">Features</a>
+        <a href="#architecture" class="text-slate-400 hover:text-white transition-colors uppercase tracking-widest hidden md:block">Architecture</a>
+        <div class="w-px h-6 bg-slate-800 hidden md:block"></div>
+        <a href="login.html" class="text-slate-300 hover:text-white transition-colors uppercase tracking-widest">Sign In</a>
+        <a href="register.html" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 transition-all border border-indigo-400 shadow-[0_0_15px_rgba(79,70,229,0.3)] uppercase tracking-widest">Get Access</a>
+      </div>
     </div>
-    <div class="flex items-center gap-4">
-       <button onclick="Auth.logout()" class="text-[9px] font-mono tracking-widest text-slate-400 hover:text-crimson-400 hover:underline cursor-pointer uppercase">[ ABORT SESSION ]</button>
-       <div class="w-px h-4 bg-slate-800"></div>
-       <div class="flex items-center gap-2">
-         <div class="w-2 h-2 bg-red-500 rounded-none blink" id="audio-dot" style="display:none;"></div>
-         <span class="text-[10px] font-mono tracking-wider" id="audio-label" style="display:none; color:#ef4444;">AUDIO REC</span>
-       </div>
-       <div class="w-px h-4 bg-slate-700"></div>
-       <span class="text-xs font-mono text-slate-400" id="timer">--:--:--</span>
-       <!-- Progress -->
-       <div class="hidden sm:flex items-center gap-1" id="progress-bar-wrap">
-         <span class="text-[9px] font-mono text-slate-500 uppercase tracking-widest" id="q-progress">Q 0/0</span>
-       </div>
+  </nav>
+
+  <!-- HERO SECTION -->
+  <main class="relative z-10 pt-20 pb-32 px-6">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col lg:flex-row items-center gap-16">
+        
+        <!-- Left: Copy -->
+        <div class="flex-1 space-y-8 text-center lg:text-left">
+          <div class="inline-flex items-center gap-2 px-3 py-1 border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-[10px] font-mono tracking-widest uppercase rounded-full">
+            <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse"></span>
+            System Version 2.0 Live
+          </div>
+          
+          <h1 class="text-5xl lg:text-7xl font-bold tracking-tight leading-[1.1]">
+            Uncompromised <br>
+            <span class="text-gradient">Academic Integrity.</span>
+          </h1>
+          
+          <p class="text-lg text-slate-400 font-inter max-w-2xl mx-auto lg:mx-0 leading-relaxed">
+            The next-generation AI proctoring platform. Featuring real-time biometric analysis, dual-camera synchronization, and cryptographic session isolation to secure online examinations natively in the browser.
+          </p>
+          
+          <div class="flex flex-col sm:flex-row items-center gap-4 justify-center lg:justify-start font-mono text-sm uppercase tracking-widest">
+            <a href="login.html" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 flex items-center justify-center gap-3 border border-indigo-400 transition-all shadow-[0_0_20px_rgba(79,70,229,0.4)] group">
+              Initialize Console
+              <svg class="w-4 h-4 transform group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+            </a>
+            <a href="#features" class="w-full sm:w-auto bg-transparent border border-slate-700 hover:border-slate-500 text-slate-300 px-8 py-4 transition-colors">
+              Read Protocol
+            </a>
+          </div>
+        </div>
+
+        <!-- Right: Dashboard Preview -->
+        <div class="flex-1 w-full lg:w-auto relative animate-float">
+          <div class="absolute inset-0 bg-gradient-to-r from-indigo-500/20 to-emerald-500/20 blur-3xl -z-10 rounded-full"></div>
+          
+          <!-- Mockup Frame -->
+          <div class="glass-panel overflow-hidden border-slate-700 w-full relative">
+            <div class="bg-black/50 border-b border-slate-700 px-4 py-3 flex items-center gap-2">
+              <div class="w-3 h-3 rounded-full bg-slate-800"></div>
+              <div class="w-3 h-3 rounded-full bg-slate-800"></div>
+              <div class="w-3 h-3 rounded-full bg-slate-800"></div>
+              <div class="ml-4 text-[10px] font-mono text-slate-500 uppercase tracking-widest">Terminal — Admin Proxy</div>
+            </div>
+            
+            <div class="p-6 relative">
+              <div class="flex gap-4 mb-4">
+                <div class="w-32 h-24 bg-slate-900 border border-slate-700 relative overflow-hidden">
+                  <div class="absolute inset-0 flex items-center justify-center object-cover opacity-50">
+                    <svg class="w-8 h-8 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  </div>
+                  <div class="absolute top-1 left-1 bg-red-500/20 border border-red-500/50 px-1 py-0.5 text-[8px] font-mono text-red-400">REC</div>
+                </div>
+                <!-- Data mock -->
+                <div class="flex-1 space-y-2">
+                  <div class="h-2 w-1/3 bg-slate-800 rounded"></div>
+                  <div class="h-2 w-1/2 bg-slate-800 rounded"></div>
+                  <div class="h-px bg-slate-800 my-2"></div>
+                  <div class="flex items-center gap-2 text-[10px] font-mono text-emerald-400">
+                    <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
+                    SYNC ALIGNED
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Logs mock -->
+              <div class="bg-black/60 border border-slate-800 p-3 font-mono text-[9px] text-slate-400 space-y-1">
+                <div class="text-indigo-400">> Engine initializing parameters...</div>
+                <div>> Injecting MediaPipe dependencies... [OK]</div>
+                <div>> Synchronizing real-time WebSocket... [OK]</div>
+                <div class="text-emerald-400">> Ready for live examination.</div>
+              </div>
+
+              <!-- Overlay floating element -->
+              <div class="absolute -right-4 -bottom-4 bg-slate-900 border border-indigo-500/50 p-4 shadow-2xl glass-panel">
+                <div class="text-[10px] font-mono text-slate-400 uppercase mb-1">Live Risk Score</div>
+                <div class="text-3xl font-mono font-bold text-indigo-400">000</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
     </div>
-  </div>
+  </main>
 
-  <div class="flex-1 flex overflow-hidden relative">
-
-    <!-- MAIN CONTENT AREA -->
-    <main class="flex-1 p-6 overflow-y-auto bg-slate-950 flex flex-col">
-
-      <!-- ===== SETUP / WAITING VIEW ===== -->
-      <div id="setup-view" class="flex-1 flex items-center justify-center">
-        <div class="max-w-lg w-full border border-slate-800 bg-slate-900 shadow-2xl">
-          <!-- Header -->
-          <div class="p-5 border-b border-slate-800 bg-black/30 flex items-center justify-between">
-            <div>
-              <h1 class="text-base font-bold uppercase tracking-widest">Exam Guardian</h1>
-              <div class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">Secure Pre-Exam Protocol</div>
-            </div>
-            <div class="w-2 h-2 bg-amber-500 rounded-none blink" id="setup-led"></div>
-          </div>
-
-          <!-- Steps -->
-          <div class="p-6 space-y-4">
-            <!-- Step 1: Camera -->
-            <div class="flex items-start gap-3 p-3 border border-slate-800 bg-slate-950/50" id="step-camera">
-              <div class="w-6 h-6 font-mono text-xs border border-slate-700 flex items-center justify-center shrink-0" id="step-camera-num">1</div>
-              <div class="flex-1">
-                <div class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Primary Camera</div>
-                <div class="text-[10px] font-mono text-slate-500 mt-0.5" id="step-camera-status">Initializing MediaPipe neural mesh...</div>
-              </div>
-            </div>
-            <!-- Step 2: Request Access -->
-            <div class="flex items-start gap-3 p-3 border border-slate-800 bg-slate-950/50" id="step-access">
-              <div class="w-6 h-6 font-mono text-xs border border-slate-700 flex items-center justify-center shrink-0 text-slate-600" id="step-access-num">2</div>
-              <div class="flex-1">
-                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Request Proctor Access</div>
-                <div class="text-[10px] font-mono text-slate-600 mt-0.5" id="step-access-status">Awaiting camera init...</div>
-              </div>
-            </div>
-            <!-- Step 3: Mobile -->
-            <div class="flex items-start gap-3 p-3 border border-slate-800 bg-slate-950/50" id="step-mobile">
-              <div class="w-6 h-6 font-mono text-xs border border-slate-700 flex items-center justify-center shrink-0 text-slate-600" id="step-mobile-num">3</div>
-              <div class="flex-1">
-                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Secondary Mobile Camera</div>
-                <div class="text-[10px] font-mono text-slate-600 mt-0.5" id="step-mobile-status">Awaiting admin approval...</div>
-                <div id="qr-container" class="hidden mt-3 inline-block bg-white p-1.5"></div>
-                <div id="mobile-url-text" class="hidden text-[10px] font-mono text-amber-500/70 mt-1 break-all"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Action Area -->
-          <div class="p-6 border-t border-slate-800 flex flex-col gap-3">
-            <button id="start-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-sm px-6 py-3 uppercase tracking-widest border border-indigo-400 transition-all" disabled>
-              Initializing Camera...
-            </button>
-            <!-- DEMO BYPASS -->
-            <button id="bypass-btn" class="hidden w-full bg-transparent border border-slate-700 hover:border-amber-500/50 text-slate-500 hover:text-amber-500 font-mono text-[10px] px-4 py-2 uppercase tracking-widest transition-all" onclick="bypassMobileAndStart()">
-              [ DEMO MODE: Skip Mobile Camera &amp; Start Immediately ]
-            </button>
-          </div>
-        </div>
+  <!-- FEATURES SECTION -->
+  <section id="features" class="relative z-10 py-24 bg-black/40 border-y border-slate-800/50">
+    <div class="max-w-7xl mx-auto px-6">
+      
+      <div class="text-center mb-16">
+        <h2 class="text-3xl font-bold tracking-tight uppercase tracking-widest text-slate-200">System <span class="text-indigo-500">Capabilities</span></h2>
+        <p class="text-slate-500 mt-4 max-w-xl mx-auto text-sm font-mono">Advanced heuristics and telemetry designed to guarantee examination integrity.</p>
       </div>
 
-      <!-- ===== EXAM QUESTION VIEW ===== -->
-      <div id="test-view" class="hidden flex-1 flex flex-col max-w-3xl mx-auto w-full">
-        <!-- Question Navigator -->
-        <div class="flex gap-1.5 flex-wrap mb-4" id="q-nav"></div>
-
-        <!-- Question Card -->
-        <div class="border border-slate-800 bg-slate-900 p-8 shadow-2xl flex-1 flex flex-col">
-          <div class="flex justify-between items-start border-b border-slate-800 pb-4 mb-6">
-            <div>
-              <div class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-1" id="section-title">Section</div>
-              <h2 id="question-title" class="text-base font-semibold text-slate-200">Question</h2>
-            </div>
-            <div class="text-right shrink-0 ml-4">
-              <div class="text-[9px] font-mono text-slate-600 uppercase">MARKS</div>
-              <div id="q-marks" class="text-sm font-mono font-bold text-indigo-400">+4 / -1</div>
-            </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        
+        <!-- Feature 1 -->
+        <div class="feature-card glass-panel p-8 border border-slate-800 group">
+          <div class="w-12 h-12 bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center mb-6 group-hover:bg-indigo-500/20 transition-colors">
+            <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
           </div>
-
-          <p id="question-text" class="text-[15px] text-slate-300 leading-relaxed mb-6 font-inter flex-1"></p>
-
-          <div id="options-container" class="space-y-2 font-mono text-sm mb-6"></div>
-
-          <!-- Code snippet area (optional) -->
-          <pre id="code-block" class="hidden bg-black/60 border border-slate-800 p-4 text-xs font-mono text-emerald-400 rounded-none mb-4 overflow-x-auto"></pre>
-
-          <div class="mt-auto pt-4 border-t border-slate-800 flex justify-between gap-3">
-            <div class="flex gap-2">
-              <button id="prev-btn" class="bg-transparent border border-slate-700 text-slate-400 px-4 py-2 font-mono text-xs hover:bg-slate-800 transition-colors disabled:opacity-30" onclick="prevQuestion()">← PREV</button>
-              <button id="flag-btn" class="bg-transparent border border-slate-700 text-amber-600 px-4 py-2 font-mono text-xs hover:bg-amber-900/20 hover:border-amber-500/50 transition-colors" onclick="flagQuestion()">FLAG</button>
-            </div>
-            <button id="next-btn" class="bg-indigo-600 border border-indigo-500 text-white px-6 py-2 font-mono text-xs hover:bg-indigo-500 transition-colors">NEXT →</button>
-          </div>
+          <h3 class="text-lg font-bold mb-3">AI Vision Tracking</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            Utilizes MediaPipe neural mesh to track gaze vectors, face orientation, and multiple faces in the frame. Calculates real-time risk scores instantly.
+          </p>
         </div>
+
+        <!-- Feature 2 -->
+        <div class="feature-card glass-panel p-8 border border-slate-800 group">
+          <div class="w-12 h-12 bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mb-6 group-hover:bg-emerald-500/20 transition-colors">
+            <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+          </div>
+          <h3 class="text-lg font-bold mb-3">Dual-Camera Sync</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            Eliminates blind spots by allowing students to rapidly sync their mobile camera via QR code, providing administrators with a crucial secondary field of view.
+          </p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="feature-card glass-panel p-8 border border-slate-800 group">
+          <div class="w-12 h-12 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-6 group-hover:bg-amber-500/20 transition-colors">
+            <svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          </div>
+          <h3 class="text-lg font-bold mb-3">Live WebSockets</h3>
+          <p class="text-slate-400 text-sm leading-relaxed">
+            Zero-latency data pipeline. Administrators view live video feeds, telemetry stats, and system alerts (like tab switching) in a synchronized dashboard.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA FOOTER -->
+  <footer class="relative z-10 py-20 px-6 overflow-hidden">
+    <!-- glow -->
+    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-indigo-600/10 rounded-full blur-[100px] -z-10 pointer-events-none"></div>
+
+    <div class="max-w-4xl mx-auto text-center">
+      <h2 class="text-3xl lg:text-4xl font-bold tracking-tight mb-8">Ready to secure your assessments?</h2>
+      
+      <div class="flex flex-col sm:flex-row justify-center gap-4 font-mono text-sm uppercase tracking-widest">
+        <a href="register.html" class="bg-white text-slate-950 px-8 py-4 hover:bg-slate-200 transition-colors font-bold">
+          Provision Account
+        </a>
+        <a href="login.html" class="glass-panel text-white px-8 py-4 border border-slate-700 hover:border-indigo-400 transition-colors">
+          Admin Console ->
+        </a>
       </div>
 
-      <!-- ===== SUBMISSION VIEW ===== -->
-      <div id="submit-view" class="hidden flex-1 flex items-center justify-center">
-        <div class="max-w-md w-full border border-slate-800 bg-slate-900 p-8 text-center">
-          <div class="w-12 h-12 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-4">
-            <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-          </div>
-          <h2 class="text-lg font-bold uppercase tracking-wider text-emerald-400 mb-2">Exam Submitted</h2>
-          <p class="text-slate-400 font-mono text-xs mb-6">Your responses have been cryptographically sealed and submitted to the proctoring engine.</p>
-          <div id="score-summary" class="bg-black/50 border border-slate-800 p-4 font-mono text-xs space-y-2 text-left mb-4"></div>
-          <button onclick="Auth.logout()" class="w-full border border-slate-700 text-slate-400 hover:text-white font-mono text-xs py-2 uppercase tracking-widest hover:bg-slate-800 transition-colors">Return to Portal</button>
-        </div>
+      <div class="mt-20 pt-8 border-t border-slate-800 text-xs font-mono text-slate-600 flex flex-col md:flex-row items-center justify-between">
+        <p>© 2026 Exam Guardian. All system logs encrypted.</p>
+        <p class="mt-2 md:mt-0">Node.js // Socket.IO // Vanilla JS</p>
       </div>
+    </div>
+  </footer>
 
-    </main>
-
-    <!-- RIGHT: PROCTOR TERMINAL -->
-    <aside class="w-72 border-l border-slate-800 bg-slate-900 flex flex-col shrink-0">
-
-       <!-- CAMERA PANEL -->
-       <div class="border-b border-slate-800 bg-black relative" style="aspect-ratio:4/3;">
-         <video id="videoElement" autoplay playsinline class="absolute inset-0 w-full h-full object-cover transform -scale-x-100 opacity-0 transition-opacity duration-1000"></video>
-         <canvas id="output_canvas" class="absolute inset-0 w-full h-full object-cover transform -scale-x-100 z-10"></canvas>
-
-         <div id="cam-loading" class="absolute inset-0 flex items-center justify-center z-20">
-           <span class="text-[10px] font-mono text-slate-500 animate-pulse">ALLOCATING WEBCAM...</span>
-         </div>
-
-         <!-- HUD Overlay -->
-         <div class="absolute top-1.5 left-1.5 z-20 pointer-events-none">
-           <div class="bg-black/80 border border-slate-700 px-1.5 py-0.5 flex items-center gap-1.5">
-             <div class="w-1.5 h-1.5 bg-red-500 rounded-none blink" id="rec-dot" style="display:none;"></div>
-             <span class="text-[9px] font-mono text-white tracking-widest">FEED_01</span>
-           </div>
-         </div>
-         <!-- Risk HUD -->
-         <div class="absolute bottom-1.5 right-1.5 z-20 pointer-events-none">
-           <div class="bg-black/80 border border-slate-700 px-2 py-0.5">
-             <span id="hud-risk" class="text-[10px] font-mono font-bold text-emerald-400">RISK: 000</span>
-           </div>
-         </div>
-       </div>
-
-       <!-- TELEMETRY -->
-       <div class="p-3 border-b border-slate-800 space-y-3">
-         <h3 class="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Runtime Telemetry</h3>
-         <div class="grid grid-cols-2 gap-2 font-mono text-[10px]">
-           <div class="bg-slate-950 border border-slate-800 p-2">
-             <div class="text-slate-600 mb-0.5">PITCH_X</div>
-             <div id="val-pitch" class="text-slate-300 font-bold">0.0°</div>
-           </div>
-           <div class="bg-slate-950 border border-slate-800 p-2">
-             <div class="text-slate-600 mb-0.5">YAW_Y</div>
-             <div id="val-yaw" class="text-slate-300 font-bold">0.0°</div>
-           </div>
-           <div class="bg-slate-950 border border-slate-800 p-2">
-             <div class="text-slate-600 mb-0.5">GAZE_VEC</div>
-             <div id="val-gaze" class="text-slate-500 font-bold">AWAITING</div>
-           </div>
-           <div class="bg-slate-950 border border-slate-800 p-2">
-             <div class="text-slate-600 mb-0.5">FACE_DET</div>
-             <div id="val-face" class="text-slate-500 font-bold">---</div>
-           </div>
-         </div>
-       </div>
-
-       <!-- VIOLATION LOG (student-side) -->
-       <div class="flex-1 overflow-y-auto p-3" id="local-log">
-         <h3 class="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-2">Activity Log</h3>
-         <div id="local-log-entries" class="space-y-1 font-mono text-[9px] text-slate-600">
-           <div>// Session initializing...</div>
-         </div>
-       </div>
-
-       <!-- NETWORK STATUS -->
-       <div class="h-8 bg-black border-t border-slate-800 flex items-center px-3 gap-2 shrink-0">
-          <div class="w-2 h-2 bg-yellow-500 rounded-none" id="net-led"></div>
-          <span class="text-[9px] font-mono text-slate-400 uppercase tracking-widest" id="net-status">WSS:// CONNECTING...</span>
-       </div>
-    </aside>
-  </div>
-
-  <script src="js/auth.js"></script>
-  <script>
-    // ============================================================
-    // QUESTION BANK
-    // ============================================================
-    const EXAM_QUESTIONS = [
-      {
-        id: 1, section: 'Data Structures', marks: '+4 / -1',
-        title: 'Q1 — Time Complexity',
-        text: 'What is the worst-case time complexity of QuickSort?',
-        options: ['O(n log n)', 'O(n²)', 'O(n)', 'O(log n)'],
-        correct: 1
-      },
-      {
-        id: 2, section: 'Networks', marks: '+4 / -1',
-        title: 'Q2 — OSI Model',
-        text: 'Which OSI layer is responsible for end-to-end error recovery and flow control?',
-        options: ['Network Layer', 'Data Link Layer', 'Transport Layer', 'Session Layer'],
-        correct: 2
-      },
-      {
-        id: 3, section: 'Operating Systems', marks: '+4 / -1',
-        title: 'Q3 — Process Scheduling',
-        text: 'Which scheduling algorithm gives the minimum average waiting time for a given set of processes?',
-        options: ['First Come First Serve (FCFS)', 'Shortest Job First (SJF)', 'Round Robin', 'Priority Scheduling'],
-        correct: 1
-      },
-      {
-        id: 4, section: 'Databases', marks: '+4 / -1',
-        title: 'Q4 — ACID Properties',
-        text: 'In a relational database transaction, "Atomicity" ensures that:',
-        options: [
-          'All operations complete or none complete',
-          'Concurrent transactions do not interfere',
-          'Committed data is permanently stored',
-          'Data remains consistent before and after transaction'
-        ],
-        correct: 0
-      },
-      {
-        id: 5, section: 'Data Structures', marks: '+4 / -1',
-        title: 'Q5 — Tree Traversal',
-        text: 'For a Binary Search Tree (BST), which traversal produces nodes in sorted (ascending) order?',
-        options: ['Pre-order', 'Post-order', 'In-order', 'Level-order'],
-        correct: 2
-      },
-      {
-        id: 6, section: 'Algorithms', marks: '+4 / -1',
-        title: 'Q6 — Dynamic Programming',
-        text: 'The Bellman-Ford algorithm correctly handles graphs with:',
-        options: [
-          'Only positive weights',
-          'Negative cycles',
-          'Negative weights (no negative cycles)',
-          'Unweighted edges only'
-        ],
-        correct: 2
-      },
-      {
-        id: 7, section: 'Computer Architecture', marks: '+4 / -1',
-        title: 'Q7 — Cache Memory',
-        text: 'In a direct-mapped cache with 1024 blocks and 64-byte block size, what is the size of the offset field?',
-        options: ['6 bits', '10 bits', '4 bits', '8 bits'],
-        correct: 0
-      },
-      {
-        id: 8, section: 'Networks', marks: '+4 / -1',
-        title: 'Q8 — TCP/IP',
-        text: 'Which flag in the TCP header is used to abruptly terminate a connection?',
-        options: ['SYN', 'FIN', 'RST', 'ACK'],
-        correct: 2
-      },
-      {
-        id: 9, section: 'Operating Systems', marks: '+4 / -1',
-        title: 'Q9 — Deadlock',
-        text: 'Which of the following IS NOT a necessary condition for deadlock?',
-        options: ['Mutual Exclusion', 'Preemption', 'Hold and Wait', 'Circular Wait'],
-        correct: 1
-      },
-      {
-        id: 10, section: 'Algorithms', marks: '+4 / -1',
-        title: 'Q10 — Graph Theory',
-        text: 'Dijkstra\'s algorithm fails when the graph contains:',
-        options: ['Undirected edges', 'Negative weight edges', 'Disconnected vertices', 'Weighted edges'],
-        correct: 1
-      }
-    ];
-
-    // ============================================================
-    // STATE
-    // ============================================================
-    const user = Auth.requireAuth('student');
-    const examId = 'CS-401_FINAL';
-    const EXAM_DURATION = 90 * 60; // 90 minutes in seconds
-
-    let currentQ = 0;
-    let answers = new Array(EXAM_QUESTIONS.length).fill(null);
-    let flagged = new Array(EXAM_QUESTIONS.length).fill(false);
-    let examActive = false;
-    let timerInterval = null;
-    let timeLeft = EXAM_DURATION;
-    let mobileSynced = false;
-    let accessGranted = false;
-
-    document.getElementById('student-id-display').textContent = user.id + ' · ' + user.name;
-
-    // ============================================================
-    // SOCKET SETUP
-    // ============================================================
-    const socket = io(window.location.origin);
-
-    socket.on('connect', () => {
-      setNetStatus('CONNECTED', 'emerald');
-    });
-
-    socket.on('disconnect', () => {
-      setNetStatus('DISCONNECTED', 'red');
-    });
-
-    function setNetStatus(text, color) {
-      const led = document.getElementById('net-led');
-      const status = document.getElementById('net-status');
-      const colorMap = { emerald: 'bg-emerald-500', red: 'bg-red-500', yellow: 'bg-yellow-500' };
-      led.className = `w-2 h-2 rounded-none ${colorMap[color] || colorMap.yellow}`;
-      status.textContent = `WSS:// ${text}`;
-    }
-
-    // Admin sent a warning
-    socket.on('admin:broadcast', (data) => {
-      if (data.studentId !== user.id && data.studentId !== 'all') return;
-      const banner = document.getElementById('admin-warning');
-      document.getElementById('warning-text').textContent = data.message;
-      banner.classList.remove('hidden');
-      logLocal(`PROCTOR: ${data.message}`, 'amber');
-      setTimeout(() => banner.classList.add('hidden'), 10000);
-    });
-
-    // Admin terminated exam
-    socket.on('student:terminated', (data) => {
-      if (data.studentId !== user.id) return;
-      examActive = false;
-      clearInterval(timerInterval);
-      document.getElementById('test-view').classList.add('hidden');
-      document.getElementById('setup-view').classList.add('hidden');
-      const submitView = document.getElementById('submit-view');
-      submitView.classList.remove('hidden');
-      document.getElementById('score-summary').innerHTML = `<div class="text-crimson-400 font-bold uppercase tracking-wider">// SESSION TERMINATED BY PROCTOR</div><div class="text-slate-500 mt-1">Your exam has been forcefully closed by the administrator.</div>`;
-    });
-
-    // ============================================================
-    // QR / MOBILE SYNC
-    // ============================================================
-    function renderQR(studentId) {
-      const qrContainer = document.getElementById('qr-container');
-      const mobileUrl = `${window.location.origin}/mobile.html?id=${studentId}`;
-      document.getElementById('mobile-url-text').textContent = mobileUrl;
-      document.getElementById('mobile-url-text').classList.remove('hidden');
-      qrContainer.classList.remove('hidden');
-      qrContainer.innerHTML = '';
-      if (typeof QRCode !== 'undefined') {
-        new QRCode(qrContainer, { text: mobileUrl, width: 110, height: 110 });
-      }
-      document.getElementById('step-mobile-status').textContent = 'Scan QR or open URL on your phone...';
-      markStep('step-mobile', 'pending');
-      markStep('step-mobile-num', 'pending');
-    }
-
-    socket.on('student:mobile_synced', () => {
-      mobileSynced = true;
-      markStep('step-mobile', 'done');
-      markStep('step-mobile-num', 'done');
-      document.getElementById('step-mobile-status').textContent = '✓ Secondary camera linked!';
-      document.getElementById('qr-container').classList.add('hidden');
-      document.getElementById('start-btn').textContent = 'BEGIN EXAM SESSION →';
-      document.getElementById('start-btn').disabled = false;
-      document.getElementById('start-btn').className = 'w-full bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-sm px-6 py-3 uppercase tracking-widest border border-emerald-400 transition-all';
-      document.getElementById('start-btn').onclick = launchExam;
-      document.getElementById('bypass-btn').classList.add('hidden');
-      logLocal('Mobile camera sync confirmed', 'emerald');
-    });
-
-    socket.on('student:access_granted', (res) => {
-      if (res.approved) {
-        accessGranted = true;
-        markStep('step-access', 'done');
-        markStep('step-access-num', 'done');
-        document.getElementById('step-access-status').textContent = '✓ Admin approved — awaiting mobile cam...';
-        startAudioMonitoring();
-        renderQR(user.id);
-        document.getElementById('bypass-btn').classList.remove('hidden');
-        logLocal('Access granted by proctor', 'emerald');
-      } else {
-        markStep('step-access', 'error');
-        document.getElementById('step-access-status').textContent = '✗ Access denied by administrator.';
-        document.getElementById('start-btn').textContent = 'ACCESS DENIED';
-        document.getElementById('start-btn').className = 'w-full bg-crimson-600/30 border border-crimson-500/50 text-crimson-400 font-mono text-sm px-6 py-3 uppercase tracking-widest cursor-not-allowed';
-        logLocal('Access denied by proctor', 'red');
-      }
-    });
-
-    function bypassMobileAndStart() {
-      mobileSynced = true;
-      markStep('step-mobile', 'done');
-      markStep('step-mobile-num', 'done');
-      document.getElementById('step-mobile-status').textContent = '⚡ Demo mode: Mobile cam bypassed';
-      document.getElementById('qr-container').classList.add('hidden');
-      launchExam();
-    }
-
-    function launchExam() {
-      socket.emit('student:join', { examId, studentId: user.id, studentName: user.name });
-      document.getElementById('setup-view').classList.add('hidden');
-      document.getElementById('test-view').classList.remove('hidden');
-      document.getElementById('setup-led').style.display = 'none';
-      document.getElementById('rec-dot').style.display = 'block';
-      document.getElementById('audio-dot').style.display = 'block';
-      document.getElementById('audio-label').style.display = 'block';
-      examActive = true;
-      startTimer();
-      renderQuestion();
-      buildNavBar();
-      logLocal('Exam session started', 'emerald');
-    }
-
-    // ============================================================
-    // STEP MARKER HELPERS
-    // ============================================================
-    function markStep(id, state) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      if (id.endsWith('-num')) {
-        if (state === 'done') { el.className = el.className.replace('border-slate-700 text-slate-600', 'border-emerald-500 text-emerald-400 bg-emerald-500/10'); el.textContent = '✓'; }
-        if (state === 'pending') { el.className = el.className.replace(/border-\w+-\d+ text-\w+-\d+/g, ''); el.className += ' border-amber-500 text-amber-400 bg-amber-500/10'; }
-        if (state === 'error') { el.className += ' border-crimson-500 text-crimson-400 bg-crimson-500/10'; }
-        return;
-      }
-      if (state === 'done') el.classList.add('border-emerald-500/30', 'bg-emerald-900/10');
-      if (state === 'pending') el.classList.add('border-amber-500/30', 'bg-amber-900/10');
-      if (state === 'error') el.classList.add('border-crimson-500/30', 'bg-crimson-900/10');
-    }
-
-    // ============================================================
-    // TIMER
-    // ============================================================
-    function startTimer() {
-      const el = document.getElementById('timer');
-      timerInterval = setInterval(() => {
-        if (timeLeft <= 0) { clearInterval(timerInterval); submitExam(); return; }
-        timeLeft--;
-        const h = String(Math.floor(timeLeft / 3600)).padStart(2, '0');
-        const m = String(Math.floor((timeLeft % 3600) / 60)).padStart(2, '0');
-        const s = String(timeLeft % 60).padStart(2, '0');
-        el.textContent = `${h}:${m}:${s}`;
-        if (timeLeft < 300) el.classList.add('text-crimson-400', 'blink'); // Last 5 min warning
-      }, 1000);
-    }
-
-    // ============================================================
-    // QUESTION RENDERING
-    // ============================================================
-    function renderQuestion() {
-      const q = EXAM_QUESTIONS[currentQ];
-      document.getElementById('section-title').textContent = q.section;
-      document.getElementById('question-title').textContent = q.title;
-      document.getElementById('question-text').textContent = q.text;
-      document.getElementById('q-marks').textContent = q.marks;
-      document.getElementById('q-progress').textContent = `Q ${currentQ + 1}/${EXAM_QUESTIONS.length}`;
-
-      const opts = document.getElementById('options-container');
-      opts.innerHTML = '';
-      q.options.forEach((opt, i) => {
-        const isSelected = answers[currentQ] === i;
-        const btn = document.createElement('button');
-        btn.className = `option-btn w-full text-left px-4 py-3 border font-mono text-xs ${isSelected ? 'selected border-indigo-500 bg-indigo-500/20 text-indigo-200' : 'border-slate-700 text-slate-300 bg-slate-950/50'}`;
-        btn.innerHTML = `<span class="text-slate-500 mr-2">[${String.fromCharCode(65 + i)}]</span> ${opt}`;
-        btn.onclick = () => selectAnswer(i);
-        if (isSelected) btn.id = 'selected-opt';
-        opts.appendChild(btn);
-      });
-
-      // Prev button state
-      document.getElementById('prev-btn').disabled = currentQ === 0;
-      // Next/Submit button
-      const nextBtn = document.getElementById('next-btn');
-      if (currentQ === EXAM_QUESTIONS.length - 1) {
-        nextBtn.textContent = 'SUBMIT EXAM ✓';
-        nextBtn.className = 'bg-emerald-600 border border-emerald-500 text-white px-6 py-2 font-mono text-xs hover:bg-emerald-500 transition-colors';
-        nextBtn.onclick = submitExam;
-      } else {
-        nextBtn.textContent = 'NEXT →';
-        nextBtn.className = 'bg-indigo-600 border border-indigo-500 text-white px-6 py-2 font-mono text-xs hover:bg-indigo-500 transition-colors';
-        nextBtn.onclick = nextQuestion;
-      }
-
-      // Flag styling
-      const flagBtn = document.getElementById('flag-btn');
-      flagBtn.className = flagged[currentQ]
-        ? 'bg-amber-900/30 border border-amber-500/60 text-amber-400 px-4 py-2 font-mono text-xs transition-colors'
-        : 'bg-transparent border border-slate-700 text-amber-600 px-4 py-2 font-mono text-xs hover:bg-amber-900/20 hover:border-amber-500/50 transition-colors';
-
-      updateNavBar();
-    }
-
-    function selectAnswer(optIdx) {
-      answers[currentQ] = optIdx;
-      renderQuestion();
-      logLocal(`Q${currentQ + 1}: Option [${String.fromCharCode(65 + optIdx)}] selected`);
-    }
-
-    function nextQuestion() {
-      if (currentQ < EXAM_QUESTIONS.length - 1) { currentQ++; renderQuestion(); }
-    }
-
-    function prevQuestion() {
-      if (currentQ > 0) { currentQ--; renderQuestion(); }
-    }
-
-    function flagQuestion() {
-      flagged[currentQ] = !flagged[currentQ];
-      renderQuestion();
-      logLocal(`Q${currentQ + 1}: ${flagged[currentQ] ? 'Flagged for review' : 'Flag removed'}`);
-    }
-
-    function buildNavBar() {
-      const nav = document.getElementById('q-nav');
-      nav.innerHTML = '';
-      EXAM_QUESTIONS.forEach((_, i) => {
-        const btn = document.createElement('button');
-        btn.id = `nav-q-${i}`;
-        btn.className = 'w-7 h-7 font-mono text-[10px] border border-slate-700 text-slate-500 hover:border-indigo-400 transition-colors';
-        btn.textContent = i + 1;
-        btn.onclick = () => { currentQ = i; renderQuestion(); };
-        nav.appendChild(btn);
-      });
-    }
-
-    function updateNavBar() {
-      EXAM_QUESTIONS.forEach((_, i) => {
-        const btn = document.getElementById(`nav-q-${i}`);
-        if (!btn) return;
-        if (i === currentQ) {
-          btn.className = 'w-7 h-7 font-mono text-[10px] border-2 border-indigo-500 text-indigo-300 bg-indigo-500/20 transition-colors';
-        } else if (flagged[i]) {
-          btn.className = 'w-7 h-7 font-mono text-[10px] border border-amber-500/60 text-amber-400 bg-amber-900/20 transition-colors';
-        } else if (answers[i] !== null) {
-          btn.className = 'w-7 h-7 font-mono text-[10px] border border-emerald-500/50 text-emerald-400 bg-emerald-900/10 transition-colors';
-        } else {
-          btn.className = 'w-7 h-7 font-mono text-[10px] border border-slate-700 text-slate-500 hover:border-indigo-400 transition-colors';
-        }
-        btn.textContent = i + 1;
-      });
-    }
-
-    // ============================================================
-    // EXAM SUBMISSION
-    // ============================================================
-    function submitExam() {
-      if (!examActive) return;
-      examActive = false;
-      clearInterval(timerInterval);
-
-      socket.emit('event:trigger', { event: 'exam_submitted', details: 'Student explicitly submitted exam' });
-
-      // Score calculation
-      let correct = 0, incorrect = 0, skipped = 0;
-      answers.forEach((ans, i) => {
-        if (ans === null) skipped++;
-        else if (ans === EXAM_QUESTIONS[i].correct) correct++;
-        else incorrect++;
-      });
-      const score = correct * 4 - incorrect;
-
-      document.getElementById('test-view').classList.add('hidden');
-      document.getElementById('submit-view').classList.remove('hidden');
-      document.getElementById('score-summary').innerHTML = `
-        <div class="flex justify-between text-slate-300"><span>Correct Answers</span><span class="text-emerald-400 font-bold">${correct} / ${EXAM_QUESTIONS.length}</span></div>
-        <div class="flex justify-between text-slate-300"><span>Incorrect</span><span class="text-crimson-400">${incorrect}</span></div>
-        <div class="flex justify-between text-slate-300"><span>Skipped</span><span class="text-slate-500">${skipped}</span></div>
-        <div class="h-px bg-slate-800 my-1"></div>
-        <div class="flex justify-between text-white font-bold"><span>Final Score</span><span class="text-indigo-400">${score} / ${EXAM_QUESTIONS.length * 4}</span></div>
-      `;
-    }
-
-    // ============================================================
-    // LOCAL LOG
-    // ============================================================
-    function logLocal(msg, color = 'slate') {
-      const colorMap = { slate: 'text-slate-500', emerald: 'text-emerald-400', amber: 'text-amber-400', red: 'text-crimson-400' };
-      const el = document.getElementById('local-log-entries');
-      const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      el.insertAdjacentHTML('afterbegin', `<div class="${colorMap[color] || colorMap.slate}">[${now}] ${msg}</div>`);
-    }
-  </script>
-  <script src="js/proctor-engine.js"></script>
 </body>
 </html>

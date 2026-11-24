@@ -6,9 +6,70 @@
 // ============================================================
 // INIT
 // ============================================================
-const user    = typeof Auth !== 'undefined' ? Auth.requireAuth('admin') : { name: 'DEMO-ADMIN', id: 'adm001' };
-const examId  = 'CS-401_FINAL';
-const socket  = io(window.location.origin);
+const user      = typeof Auth !== 'undefined' ? Auth.requireAuth('admin') : { name: 'DEMO-ADMIN', id: 'adm001' };
+let examId      = localStorage.getItem('current_exam_id');
+let examTitle   = localStorage.getItem('current_exam_title') || 'COMMAND_CENTER';
+const socket    = io(window.location.origin);
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (!examId) {
+    // Keep modal hidden, just preset the dates for when they DO open it manually
+    const now = new Date();
+    document.getElementById('exam-date-input').valueAsDate = now;
+    document.getElementById('exam-time-input').value = now.toTimeString().substring(0,5);
+  } else {
+    updateHeaderWithExam();
+  }
+});
+
+function updateHeaderWithExam() {
+  const titleEl = document.querySelector('header h1 + p');
+  if(titleEl) titleEl.textContent = `${examTitle.toUpperCase()} // ${examId}`;
+  
+  const reportTitle = document.querySelector('#export-modal h3');
+  if(reportTitle) reportTitle.textContent = `Intelligence Report — ${examId}`;
+}
+
+window.initializeExam = () => {
+  const title = document.getElementById('exam-title-input').value.trim() || 'Exam Session';
+  const id    = document.getElementById('exam-id-input').value.trim().toUpperCase() || ('EXAM_' + Math.floor(Math.random()*10000));
+  const dur   = document.getElementById('exam-duration-input').value.trim() || '90';
+
+  localStorage.setItem('current_exam_id', id);
+  localStorage.setItem('current_exam_title', title);
+  localStorage.setItem('current_exam_duration', dur);
+
+  // Track total exams created
+  const prevCount = parseInt(localStorage.getItem('eg_exam_count') || '0', 10);
+  const newCount = prevCount + 1;
+  localStorage.setItem('eg_exam_count', newCount);
+  const createdEl = document.getElementById('stat-exams-created');
+  if (createdEl) createdEl.textContent = newCount;
+
+  // Store this exam in history
+  const history = JSON.parse(localStorage.getItem('eg_exam_history') || '[]');
+  history.push({ id, title, createdAt: new Date().toISOString(), duration: dur });
+  localStorage.setItem('eg_exam_history', JSON.stringify(history));
+
+  examId = id;
+  examTitle = title;
+  document.getElementById('create-exam-modal').classList.add('hidden');
+  updateHeaderWithExam();
+  updateDashboardExamLabel();
+
+  socket.emit('admin:join', { examId });
+  appendLedger('sys', `Exam Session [${examId}] Live`, 'emerald');
+
+  // Show live dot in sidebar
+  const liveDot = document.getElementById('monitoring-live-dot');
+  if (liveDot) liveDot.classList.remove('hidden');
+
+  if (typeof renderAdminExamSessions === 'function') {
+    renderAdminExamSessions();
+  }
+  // Auto-switch to Live Monitoring
+  if (typeof switchTabById === 'function') switchTabById('monitoring');
+};
 
 let activeStudents  = new Map(); // studentId → state
 let selectedTarget  = null;
@@ -20,11 +81,86 @@ let currentModalTarget = null;
 
 document.getElementById('admin-name').textContent = user.name.toUpperCase();
 
+// Restore exam count from localStorage on load
+document.addEventListener('DOMContentLoaded', () => {
+  const storedCount = parseInt(localStorage.getItem('eg_exam_count') || '0', 10);
+  const createdEl = document.getElementById('stat-exams-created');
+  if (createdEl) createdEl.textContent = storedCount;
+
+  renderAdminExamSessions();
+});
+
+function renderAdminExamSessions() {
+  const history = JSON.parse(localStorage.getItem('eg_exam_history') || '[]');
+  const tableBody = document.getElementById('sessions-table-body');
+  if (!tableBody) return;
+  
+  if (history.length === 0) {
+    tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-10 text-slate-600 text-sm">No exam sessions created yet.</td></tr>';
+    return;
+  }
+  
+  tableBody.innerHTML = '';
+  // iterate in reverse so newest is on top
+  [...history].reverse().forEach(exam => {
+    const isCurrent = exam.id === localStorage.getItem('current_exam_id');
+    const durHr = exam.duration ? exam.duration + " Min" : "90 Min";
+    const statusHtml = isCurrent 
+      ? '<span class="px-2 py-1 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-bold">Active Protocol</span>' 
+      : '<span class="px-2 py-1 rounded bg-slate-500/10 text-slate-400 text-[10px] font-bold">Stored</span>';
+      
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-white/5 hover:bg-slate-800/30 transition';
+    tr.innerHTML = `
+      <td class="px-4 py-3 font-semibold text-white tracking-wide">${exam.title}</td>
+      <td class="px-4 py-3 text-indigo-400 font-mono text-xs uppercase">${exam.id}</td>
+      <td class="px-4 py-3 text-slate-400 text-sm">${durHr}</td>
+      <td class="px-4 py-3">${statusHtml}</td>
+      <td class="px-4 py-3">
+        <button onclick="setGlobalExamId('${exam.id}', '${exam.title}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-xs font-semibold transition shadow shadow-indigo-500/20 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
+          Focus &amp; Monitor
+        </button>
+      </td>
+    `;
+    tableBody.appendChild(tr);
+  });
+}
+
+window.setGlobalExamId = (id, title) => {
+  localStorage.setItem('current_exam_id', id);
+  localStorage.setItem('current_exam_title', title);
+  examId = id;
+  examTitle = title;
+  updateHeaderWithExam();
+  updateDashboardExamLabel();
+  renderAdminExamSessions();
+
+  // Re-join the socket room for this exam
+  socket.emit('admin:join', { examId: id });
+  appendLedger('sys', `Focused on Exam [${id}]`, 'indigo');
+
+  // Show live dot
+  const liveDot = document.getElementById('monitoring-live-dot');
+  if (liveDot) liveDot.classList.remove('hidden');
+
+  // Switch to Live Monitoring tab
+  if (typeof switchTabById === 'function') switchTabById('monitoring');
+};
+
+function updateDashboardExamLabel() {
+  const el = document.getElementById('dash-active-exam');
+  if (el) el.textContent = examId ? `${examTitle} — ${examId}` : 'No session active';
+}
+
 // ============================================================
 // CHART INIT
 // ============================================================
 function initChart() {
-  const ctx = document.getElementById('riskChart').getContext('2d');
+  const canvas = document.getElementById('riskChart');
+  if (!canvas) return; // view-monitoring may be hidden, retry on tab switch
+  if (riskChart) return; // already initialized
+  const ctx = canvas.getContext('2d');
   riskChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -56,14 +192,22 @@ function initChart() {
     }
   });
 }
-document.addEventListener('DOMContentLoaded', initChart);
+// Init chart lazily when the monitoring tab becomes visible
+document.addEventListener('DOMContentLoaded', () => {
+  // Try immediately; will succeed if view-monitoring is shown first
+  initChart();
+});
+// Expose so switchTab('monitoring') can call it
+window.ensureChartInit = initChart;
 
 // ============================================================
 // SOCKET — ADMIN JOIN
 // ============================================================
 socket.on('connect', () => {
-  socket.emit('admin:join', { examId });
-  appendLedger('sys', 'Connected to Intelligence Engine', 'slate');
+  if (examId) {
+    socket.emit('admin:join', { examId });
+    appendLedger('sys', 'Connected to Intelligence Engine', 'slate');
+  }
 });
 
 socket.on('disconnect', () => {
@@ -86,24 +230,61 @@ socket.on('admin:snapshot', (students) => {
 
 // Access request from student waiting room
 socket.on('admin:join_request', (req) => {
+  // --- Sidebar widget ---
   const container = document.getElementById('approvals-container');
   const list      = document.getElementById('approvals-list');
   if (container) container.classList.remove('hidden');
 
   const reqId = `req-${req.studentId}`;
-  if (document.getElementById(reqId)) return;
+  if (document.getElementById(reqId)) return; // already rendered
 
   list.insertAdjacentHTML('beforeend', `
     <div id="${reqId}" class="flex items-center gap-1.5 bg-slate-950 border border-amber-500/30 px-2 py-1 text-[9px] font-mono text-slate-300">
       <span class="text-amber-400 font-bold">${req.studentName}</span>
       <span class="text-slate-600">${req.studentId}</span>
       <button onclick="approveStudent('${req.studentId}')" class="bg-emerald-700 hover:bg-emerald-600 text-white px-1.5 py-0.5 ml-1 font-bold transition-colors">✓</button>
-      <button onclick="denyStudent('${req.studentId}')"   class="bg-crimson-700 hover:bg-crimson-600 text-white px-1.5 py-0.5 font-bold transition-colors">✗</button>
+      <button onclick="denyStudent('${req.studentId}')"   class="bg-red-700 hover:bg-red-600 text-white px-1.5 py-0.5 font-bold transition-colors">✗</button>
     </div>
   `);
 
+  // --- Requests tab table ---
+  const tbody = document.getElementById('requests-table-body');
+  if (tbody) {
+    // Remove empty-state row if present
+    const empty = tbody.querySelector('tr td[colspan]');
+    if (empty) empty.closest('tr').remove();
+
+    const rowId = `req-row-${req.studentId}`;
+    if (!document.getElementById(rowId)) {
+      tbody.insertAdjacentHTML('afterbegin', `
+        <tr id="${rowId}" class="border-b border-white/5 hover:bg-white/[0.02] transition">
+          <td class="px-4 py-3">
+            <div class="font-semibold text-white">${req.studentName}</div>
+            <div class="text-[11px] text-slate-500 font-mono">${req.studentId}</div>
+          </td>
+          <td class="px-4 py-3 text-slate-400 text-sm">—</td>
+          <td class="px-4 py-3">
+            <span class="text-[11px] font-mono text-indigo-400 uppercase bg-indigo-500/10 px-2 py-1 rounded">${req.examId || examId || '—'}</span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block"></span>Pending
+            </span>
+          </td>
+          <td class="px-4 py-3 text-right flex justify-end gap-2">
+            <button onclick="approveStudent('${req.studentId}')" class="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-semibold transition">✓ Approve</button>
+            <button onclick="denyStudent('${req.studentId}')"   class="px-3 py-1.5 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-semibold transition">✗ Deny</button>
+          </td>
+        </tr>
+      `);
+    }
+  }
+
+  // --- Update pending badge in nav ---
+  updateRequestsBadge();
+
   appendLedger('access', `${req.studentName} (${req.studentId}) requesting entry`, 'amber');
-  // Flash notification
+  // Flash title notification
   document.title = '🔔 Access Request — Exam Guardian';
   setTimeout(() => { document.title = 'Exam Guardian — Admin Command Center'; }, 4000);
 });
@@ -139,7 +320,8 @@ socket.on('student:status_change', ({ studentId, studentName, isOnline }) => {
 // Live violation alert
 socket.on('alert:live', (alert) => {
   totalAlerts++;
-  document.getElementById('stat-alerts').textContent = totalAlerts;
+  const alertEl = document.getElementById('stat-alerts');
+  if (alertEl) alertEl.textContent = totalAlerts;
 
   const isCrit = alert.analysis.prob > 60 || alert.analysis.penalty >= 30;
   const color  = isCrit ? 'crimson' : 'amber';
@@ -228,11 +410,49 @@ window.denyStudent = (studentId) => {
 };
 
 function removeApprovalCard(studentId) {
-  const el   = document.getElementById(`req-${studentId}`);
+  // Remove from sidebar widget
+  const el = document.getElementById(`req-${studentId}`);
   if (el) el.remove();
   const list = document.getElementById('approvals-list');
   if (list && list.children.length === 0) {
     document.getElementById('approvals-container').classList.add('hidden');
+  }
+
+  // Remove from requests tab table
+  const row = document.getElementById(`req-row-${studentId}`);
+  if (row) row.remove();
+
+  // Show empty state if no more rows
+  const tbody = document.getElementById('requests-table-body');
+  if (tbody && tbody.children.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-10 text-slate-600 text-sm">No pending join requests.</td></tr>';
+  }
+
+  // Update badge count
+  updateRequestsBadge();
+}
+
+function updateRequestsBadge() {
+  const tbody = document.getElementById('requests-table-body');
+  const pendingRows = tbody ? tbody.querySelectorAll('tr[id^="req-row-"]').length : 0;
+
+  // Update the Pending (N) filter button inside the requests view
+  const pendingBtn = document.querySelector('#view-requests button');
+  if (pendingBtn) pendingBtn.textContent = `Pending (${pendingRows})`;
+
+  // Add a red dot badge on the sidebar "Join Requests" nav link if pending
+  const navLink = document.querySelector('#sidebar-nav .nav-link[onclick*="requests"]');
+  if (navLink) {
+    const existingBadge = navLink.querySelector('.req-badge');
+    if (pendingRows > 0) {
+      if (!existingBadge) {
+        navLink.insertAdjacentHTML('beforeend', `<span class="req-badge ml-auto inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-[10px] font-bold text-white">${pendingRows}</span>`);
+      } else {
+        existingBadge.textContent = pendingRows;
+      }
+    } else if (existingBadge) {
+      existingBadge.remove();
+    }
   }
 }
 
@@ -484,11 +704,75 @@ function appendRiskHistory(studentId, score) {
 // ============================================================
 // STATS BAR
 // ============================================================
+function getStudentActivityStatus(s) {
+  if (s.isSubmitted) return 'completed';
+  if (s.isOnline)    return 'active';
+  if (s.isApproved)  return 'offline';
+  return 'pending';
+}
+
 function updateStats() {
   const students = Array.from(activeStudents.values());
-  document.getElementById('stat-total').textContent   = students.length;
-  document.getElementById('stat-online').textContent  = students.filter(s => s.isOnline).length;
-  document.getElementById('stat-highrisk').textContent = students.filter(s => s.riskScore > 75).length;
+  const active    = students.filter(s => s.isOnline && !s.isSubmitted);
+  const completed = students.filter(s => s.isSubmitted);
+  const pending   = students.filter(s => !s.isOnline && !s.isSubmitted);
+
+  const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setTxt('stat-total',     students.length);
+  setTxt('stat-online',    active.length);
+  setTxt('stat-completed', completed.length);
+  setTxt('stat-pending',   pending.length);
+  setTxt('stat-highrisk',  students.filter(s => s.riskScore > 75).length);
+
+  // Mini pills in activity table header
+  setTxt('act-active',    active.length);
+  setTxt('act-completed', completed.length);
+  setTxt('act-pending',   pending.length);
+
+  renderActivityTable(students);
+}
+
+function renderActivityTable(students) {
+  const tbody = document.getElementById('activity-table-body');
+  if (!tbody) return;
+
+  if (students.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-10 text-slate-600 text-sm">No students connected yet</td></tr>';
+    return;
+  }
+
+  const statusBadge = (s) => {
+    const status = getStudentActivityStatus(s);
+    const map = {
+      active:    '<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>Active</span>',
+      completed: '<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">✓ Completed</span>',
+      offline:   '<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-bold bg-slate-700/50 text-slate-400 border border-slate-600/30">● Offline</span>',
+      pending:   '<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">⏳ Pending</span>',
+    };
+    return map[status] || map.pending;
+  };
+
+  const riskColor = (r) => r > 75 ? 'text-red-500 font-bold' : (r > 40 ? 'text-amber-400 font-semibold' : 'text-emerald-400');
+  const probColor = (p) => p > 70 ? 'text-red-500 font-bold' : (p > 40 ? 'text-amber-400 font-semibold' : 'text-slate-400');
+
+  const sorted = [...students].sort((a, b) => {
+    const order = { active: 0, pending: 1, offline: 2, completed: 3 };
+    return (order[getStudentActivityStatus(a)] ?? 9) - (order[getStudentActivityStatus(b)] ?? 9);
+  });
+
+  tbody.innerHTML = sorted.map(s => `
+    <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer" onclick="selectTarget('${s.studentId}')">
+      <td class="px-4 py-3">
+        <div class="font-semibold text-white text-sm">${s.studentName || s.studentId}</div>
+        <div class="text-[11px] text-slate-500 font-mono">${s.studentId}</div>
+      </td>
+      <td class="px-4 py-3">${statusBadge(s)}</td>
+      <td class="px-4 py-3 font-mono text-sm ${riskColor(s.riskScore)}">${s.riskScore}</td>
+      <td class="px-4 py-3 font-mono text-sm ${probColor(s.cheatingProbability)}">${s.cheatingProbability}%</td>
+      <td class="px-4 py-3 text-slate-400 text-sm">${s.eventLog ? s.eventLog.length : 0}</td>
+      <td class="px-4 py-3 font-mono text-[11px] text-indigo-400">${s.examId || examId || '—'}</td>
+    </tr>
+  `).join('');
 }
 
 // ============================================================
@@ -506,8 +790,10 @@ window.filterStudents = (query) => {
 
 window.toggleSort = () => {
   sortByRisk = !sortByRisk;
-  document.getElementById('grid-sort-label').textContent = sortByRisk ? 'Sorted by: Risk ↓' : 'Sorted by: Name A-Z';
-  const grid     = document.getElementById('student-grid');
+  const labelEl = document.getElementById('grid-sort-label-mon');
+  if (labelEl) labelEl.textContent = sortByRisk ? 'Sorted by: Risk ↓' : 'Sorted by: Name A-Z';
+  const grid = document.getElementById('student-grid');
+  if (!grid) return;
   const students = Array.from(activeStudents.values());
   students.sort((a, b) => sortByRisk
     ? b.riskScore - a.riskScore

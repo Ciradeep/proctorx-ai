@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Exam Guardian - Secure Portal</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { fontFamily: { sans: ['Outfit', 'sans-serif'], mono: ['monospace'] } } }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    body { font-family: 'Outfit', sans-serif; background-color: #0b1121; }
+    .glass-card { background: rgba(30, 41, 59, 0.5); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; }
+    .blink { animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: 0.3; } }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.4); border-radius: 4px; }
+    .option-btn { transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.05); }
+    .option-btn.selected { background: rgba(99,102,241,0.2) !important; border-color: #6366f1 !important; color: #fff; }
+    .option-btn:hover:not(.selected) { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-200 antialiased h-screen flex flex-col overflow-hidden relative">
+
+  <div id="admin-warning" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 backdrop-blur-md rounded-xl px-6 py-3 shadow-2xl flex items-center gap-3">
+    <div class="w-2 h-2 bg-white rounded-full blink"></div>
+    <span class="text-sm font-bold text-white uppercase tracking-wider">Proctor Alert:</span>
+    <span id="warning-text" class="text-sm text-white font-medium"></span>
+  </div>
+
+  <header class="h-16 border-b border-white/5 bg-slate-900/60 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-10">
+    <div class="flex items-center gap-4">
+       <span class="text-sm font-bold text-slate-300">Exam Guardian</span>
+       <div class="w-px h-4 bg-white/10"></div>
+       <span class="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-1 rounded-md font-mono" id="header-exam-id">AWAITING</span>
+       <span id="student-id-display" class="text-[11px] font-mono text-slate-400"></span>
+    </div>
+    <div class="flex items-center gap-4">
+       <div class="flex items-center gap-2">
+         <div class="w-1.5 h-1.5 bg-red-500 rounded-full blink hidden" id="audio-dot"></div>
+         <span class="text-[10px] font-bold text-red-400 tracking-widest hidden" id="audio-label">REC</span>
+       </div>
+       <div class="w-px h-4 bg-white/10"></div>
+       <span class="text-xl font-bold font-mono text-white" id="timer">--:--:--</span>
+       <div class="w-px h-4 bg-white/10"></div>
+       <span class="text-xs font-semibold text-indigo-400" id="q-progress">Q 0/0</span>
+       <button onclick="Auth.logout()" class="ml-4 text-xs font-medium text-slate-500 hover:text-red-400 transition-colors">Abort</button>
+    </div>
+  </header>
+
+  <div class="flex-1 flex overflow-hidden">
+    <!-- LEFT SIDEBAR -->
+    <aside id="left-sidebar" class="w-64 border-r border-white/5 bg-slate-900/30 shrink-0 flex flex-col z-20">
+      <div class="flex-1 overflow-y-auto py-6">
+        <div class="px-6 mb-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Student Menu</div>
+        <nav class="space-y-1 px-4" id="student-nav">
+          <a href="#" onclick="switchStudentTab('dashboard', this)" class="flex items-center px-4 py-2.5 bg-indigo-500/10 text-indigo-300 rounded-lg text-sm font-medium border border-indigo-500/20 stu-nav-link">Dashboard</a>
+          <a href="#" onclick="switchStudentTab('exams', this)" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition stu-nav-link">My Exams</a>
+          <a href="#" onclick="switchStudentTab('upcoming', this)" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition stu-nav-link">Upcoming Exams</a>
+          <a href="#" onclick="switchStudentTab('results', this)" class="flex items-center px-4 py-2.5 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 rounded-lg text-sm font-medium transition stu-nav-link">Results</a>
+        </nav>
+      </div>
+      <div class="p-4 border-t border-white/5 bg-slate-900/50 flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-indigo-900 border border-indigo-700 flex items-center justify-center text-indigo-300 font-bold text-sm uppercase" id="student-initial">S</div>
+        <div class="flex-1 overflow-hidden">
+          <div class="text-sm font-bold text-white truncate" id="student-name">Student Name</div>
+          <div class="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">STUDENT</div>
+        </div>
+        <button onclick="Auth.logout()" class="text-slate-500 hover:text-red-400 p-2 transition">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+        </button>
+      </div>
+    </aside>
+    <main class="flex-1 overflow-y-auto p-4 lg:p-8 flex flex-col relative z-0">
+      
+      <!-- STUDENT DASHBOARD VIEWS -->
+      <div id="overview-container" class="flex-1 flex flex-col w-full max-w-5xl mx-auto">
+        <div class="mb-8">
+          <h1 class="text-2xl font-bold text-white mb-2">Student Portal</h1>
+          <p class="text-sm text-slate-400">Manage your academic evaluations.</p>
+        </div>
+
+        <!-- DASHBOARD TAB -->
+        <div id="stu-view-dashboard" class="block">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="glass-card p-6 border-t-2 border-t-indigo-500">
+              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Total Exams</span>
+              <div class="text-3xl font-bold text-white mt-2">0</div>
+            </div>
+            <div class="glass-card p-6 border-t-2 border-t-amber-500">
+              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Pending Exams</span>
+              <div class="text-3xl font-bold text-amber-400 mt-2">0</div>
+            </div>
+            <div class="glass-card p-6 border-t-2 border-t-emerald-500">
+              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Completed</span>
+              <div class="text-3xl font-bold text-emerald-400 mt-2">0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- EXAMS TAB -->
+        <div id="stu-view-exams" class="hidden">
+          <div class="glass-card flex-1 flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-white/5 bg-slate-900/30">
+              <h2 class="text-lg font-bold text-white">Assigned Examinations</h2>
+            </div>
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-white/5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="text-left px-6 py-4">Exam Title</th>
+                  <th class="text-left px-6 py-4">Duration</th>
+                  <th class="text-left px-6 py-4">Status</th>
+                  <th class="text-right px-6 py-4">Action</th>
+                </tr>
+              </thead>
+              <tbody id="student-exams-list">
+                <tr id="empty-exams"><td colspan="4" class="text-center py-10 text-slate-600 text-sm">No examinations are currently assigned to you.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- UPCOMING TAB -->
+        <div id="stu-view-upcoming" class="hidden">
+           <div class="glass-card p-10 text-center border-t-2 border-t-sky-500">
+              <span class="text-4xl mb-4 block">📅</span>
+              <h3 class="text-xl font-bold text-white mb-2">No Upcoming Exams</h3>
+              <p class="text-sm text-slate-400">There are no scheduled exams for you in the next 14 days.</p>
+           </div>
+        </div>
+
+        <!-- RESULTS TAB -->
+        <div id="stu-view-results" class="hidden">
+          <div class="glass-card flex-1 flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-white/5 bg-slate-900/30">
+              <h2 class="text-lg font-bold text-white">Examination Results</h2>
+            </div>
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-white/5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="text-left px-6 py-4">Subject / Exam Title</th>
+                  <th class="text-left px-6 py-4">Date Completed</th>
+                  <th class="text-left px-6 py-4">Score</th>
+                  <th class="text-right px-6 py-4">Status</th>
+                </tr>
+              </thead>
+              <tbody id="student-results-list">
+                <tr id="empty-results"><td colspan="4" class="text-center py-10 text-slate-600 text-sm">No exam results available yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- END DASHBOARD VIEWS -->
+
+      <div id="setup-view" class="hidden flex-1 flex items-center justify-center">
+        <div class="glass-card w-full max-w-lg p-8 shadow-2xl relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
+          <div class="flex justify-between items-start mb-6">
+            <div>
+              <h1 class="text-2xl font-bold text-white mb-1">Pre-Exam Check</h1>
+              <p class="text-sm text-slate-400">Complete required verifications.</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <button onclick="returnToDashboard()" class="text-xs text-slate-500 hover:text-slate-300 transition flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                Back
+              </button>
+              <div class="w-3 h-3 bg-amber-500 rounded-full blink" id="setup-led"></div>
+            </div>
+          </div>
+          
+          <div class="space-y-3 mb-8">
+            <div class="glass-card p-4 flex gap-4 items-center border border-white/5" id="step-camera">
+              <div class="w-8 h-8 rounded-full border border-slate-600 flex items-center justify-center text-sm font-bold" id="step-camera-num">1</div>
+              <div>
+                <div class="text-sm font-semibold text-slate-200">Neural Mesh Init</div>
+                <div class="text-xs text-slate-500" id="step-camera-status">Checking cameras...</div>
+              </div>
+            </div>
+            <div class="glass-card p-4 flex gap-4 items-center border border-white/5" id="step-access">
+              <div class="w-8 h-8 rounded-full border border-slate-600 flex items-center justify-center text-sm font-bold" id="step-access-num">2</div>
+              <div>
+                <div class="text-sm font-semibold text-slate-200">Proctor Approval</div>
+                <div class="text-xs text-slate-500" id="step-access-status">Waiting...</div>
+              </div>
+            </div>
+            <div class="glass-card p-4 flex gap-4 items-start border border-white/5" id="step-mobile">
+              <div class="w-8 h-8 rounded-full border border-slate-600 flex items-center justify-center text-sm font-bold shrink-0" id="step-mobile-num">3</div>
+              <div class="w-full">
+                <div class="text-sm font-semibold text-slate-200">Secondary Camera Link</div>
+                <div class="text-xs text-slate-500" id="step-mobile-status">Pending...</div>
+                <div id="qr-container" class="hidden mt-4 p-2 bg-white rounded-xl mx-auto w-max"></div>
+                <div id="mobile-url-text" class="hidden text-xs text-indigo-400 mt-2 break-all text-center"></div>
+              </div>
+            </div>
+          </div>
+          <button id="start-btn" class="w-full bg-slate-800 text-slate-400 font-semibold rounded-xl py-3.5 transition-all text-sm mb-3 shadow-lg" disabled>Checking...</button>
+          <button id="bypass-btn" class="hidden w-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold rounded-xl py-3 text-xs" onclick="bypassMobileAndStart()">Skip Secondary Camera (Demo)</button>
+        </div>
+      </div>
+
+      <div id="test-view" class="hidden flex-1 flex flex-col max-w-4xl mx-auto w-full">
+        <div class="flex gap-2 flex-wrap mb-6" id="q-nav"></div>
+        <div class="glass-card p-8 flex-1 flex flex-col shadow-2xl">
+          <div class="flex justify-between items-start mb-8 pb-4 border-b border-white/10">
+            <div>
+               <p class="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-1" id="section-title">Section</p>
+               <h2 id="question-title" class="text-xl font-bold text-white">Question</h2>
+            </div>
+            <div class="text-right">
+               <span class="text-xs text-slate-500 block mb-1">Marks</span>
+               <span id="q-marks" class="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">+4 / -1</span>
+            </div>
+          </div>
+          <p id="question-text" class="text-base text-slate-200 leading-relaxed mb-8"></p>
+          <div id="options-container" class="space-y-3 mb-8"></div>
+          <pre id="code-block" class="hidden bg-slate-900 border border-white/5 rounded-xl p-4 text-sm font-mono text-slate-300"></pre>
+
+          <div class="mt-auto flex justify-between gap-4 pt-6 border-t border-white/10">
+            <div class="flex gap-3">
+              <button id="prev-btn" class="px-5 py-2.5 rounded-lg border border-white/10 text-slate-300 font-medium hover:bg-white/5 transition-colors text-sm disabled:opacity-50" onclick="prevQuestion()">Previous</button>
+              <button id="flag-btn" class="px-5 py-2.5 rounded-lg border border-amber-500/30 text-amber-500 hover:bg-amber-500/10 font-medium transition-colors text-sm" onclick="flagQuestion()">Flag for Review</button>
+            </div>
+            <button id="next-btn" class="px-8 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium shadow-lg shadow-indigo-500/20 transition-all text-sm" onclick="nextQuestion()">Next</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="submit-view" class="hidden flex-1 flex items-center justify-center">
+        <div class="glass-card w-full max-w-md p-8 text-center">
+          <div class="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/30">
+            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <h2 class="text-2xl font-bold text-white mb-2">Exam Submitted</h2>
+          <p class="text-slate-400 text-sm mb-6">Your answers have been cryptographically secured.</p>
+          <div id="score-summary" class="bg-slate-900/50 rounded-xl p-6 text-sm space-y-3 text-left mb-6 border border-white/5"></div>
+          <button onclick="Auth.logout()" class="w-full border border-white/10 hover:bg-white/5 text-slate-300 rounded-xl py-3 font-medium transition">Return to Portal</button>
+        </div>
+      </div>
+    </main>
+
+    <aside id="right-sidebar" class="hidden w-80 glass-card m-4 ml-0 shrink-0 flex flex-col z-10 border border-white/5 overflow-hidden">
+       <div class="h-48 relative border-b border-white/5 bg-black">
+         <video id="videoElement" autoplay playsinline class="w-full h-full object-cover transform -scale-x-100 opacity-50"></video>
+         <canvas id="output_canvas" class="absolute top-0 left-0 w-full h-full object-cover transform -scale-x-100 z-10"></canvas>
+         <div id="cam-loading" class="absolute inset-0 flex items-center justify-center z-20">
+           <span class="text-[10px] font-bold text-indigo-400 bg-indigo-500/20 px-3 py-1 rounded-full animate-pulse">Initializing Cam</span>
+         </div>
+         <div class="absolute top-2 left-2 z-20 flex gap-2">
+           <div class="bg-slate-900/80 backdrop-blur px-2 py-1 flex items-center gap-2 rounded text-[10px] font-bold text-white">
+             <div class="w-2 h-2 bg-red-500 rounded-full hidden blink" id="rec-dot"></div> FEED 1
+           </div>
+         </div>
+         <div class="absolute bottom-2 right-2 z-20">
+           <div class="bg-slate-900/80 backdrop-blur px-2 py-1 rounded text-[10px] font-bold">
+             <span id="hud-risk" class="text-emerald-400">RISK: 0</span>
+           </div>
+         </div>
+       </div>
+
+       <div class="p-4 border-b border-white/5">
+         <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Telemetry Data</h3>
+         <div class="grid grid-cols-2 gap-3">
+           <div class="bg-slate-900/50 p-2 rounded-lg border border-white/5">
+             <div class="text-[10px] text-slate-500 mb-1">PITCH X</div>
+             <div id="val-pitch" class="text-xs font-bold text-indigo-400">0.0°</div>
+           </div>
+           <div class="bg-slate-900/50 p-2 rounded-lg border border-white/5">
+             <div class="text-[10px] text-slate-500 mb-1">YAW Y</div>
+             <div id="val-yaw" class="text-xs font-bold text-indigo-400">0.0°</div>
+           </div>
+         </div>
+         <div class="hidden">
+            <div id="val-gaze"></div><div id="val-face"></div>
+         </div>
+       </div>
+
+       <div class="flex-1 overflow-y-auto p-4 flex flex-col" id="local-log">
+         <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Session Log</h3>
+         <div id="local-log-entries" class="space-y-2 text-[11px] font-mono"></div>
+       </div>
+
+       <div class="p-3 bg-slate-900/50 border-t border-white/5 flex items-center gap-2">
+          <div class="w-2 h-2 rounded-full bg-amber-500" id="net-led"></div>
+          <span class="text-[10px] font-bold text-slate-400" id="net-status">CONNECTING...</span>
+       </div>
+    </aside>
+  </div>
+
+  <!-- No Join Modal needed anymore, exams are assigned -->
+
+  <script src="js/auth.js"></script>
+  <script>
+    // Include full QUESTION BANK JS here
+    const EXAM_QUESTIONS = [
+      { id: 1, section: 'Data Structures', marks: '+4 / -1', title: 'Q1 — Time Complexity', text: 'What is the worst-case time complexity of QuickSort?', options: ['O(n log n)', 'O(n²)', 'O(n)', 'O(log n)'], correct: 1 },
+      { id: 2, section: 'Networks', marks: '+4 / -1', title: 'Q2 — OSI Model', text: 'Which OSI layer is responsible for end-to-end error recovery and flow control?', options: ['Network Layer', 'Data Link Layer', 'Transport Layer', 'Session Layer'], correct: 2 },
+      { id: 3, section: 'Operating Systems', marks: '+4 / -1', title: 'Q3 — Process Scheduling', text: 'Which scheduling algorithm gives the minimum average waiting time for a given set of processes?', options: ['First Come First Serve (FCFS)', 'Shortest Job First (SJF)', 'Round Robin', 'Priority Scheduling'], correct: 1 },
+      { id: 4, section: 'Databases', marks: '+4 / -1', title: 'Q4 — ACID Properties', text: 'In a relational database transaction, "Atomicity" ensures that:', options: ['All operations complete or none complete', 'Concurrent transactions do not interfere', 'Committed data is permanently stored', 'Data remains consistent before and after transaction'], correct: 0 },
+      { id: 5, section: 'Data Structures', marks: '+4 / -1', title: 'Q5 — Tree Traversal', text: 'For a Binary Search Tree (BST), which traversal produces nodes in sorted (ascending) order?', options: ['Pre-order', 'Post-order', 'In-order', 'Level-order'], correct: 2 }
+    ];
+
+    const user = Auth.requireAuth('student');
+    let examId = sessionStorage.getItem('student_exam_id');
+    const EXAM_DURATION = 90 * 60; 
+
+    let currentQ = 0; let answers = new Array(EXAM_QUESTIONS.length).fill(null); let flagged = new Array(EXAM_QUESTIONS.length).fill(false);
+    let examActive = false; let timerInterval = null; let timeLeft = EXAM_DURATION; let mobileSynced = false; let accessGranted = false;
+
+    document.getElementById('student-id-display').textContent = user.id + ' · ' + user.name;
+    document.getElementById('student-name').textContent = user.name || 'Student';
+    document.getElementById('student-initial').textContent = (user.name || 'S').charAt(0).toUpperCase();
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // Always clear stale exam state on fresh dashboard load
+      // (keeps it only if we are actively mid-exam — test-view was visible)
+      const wasInExam = sessionStorage.getItem('eg_in_exam') === 'true';
+      if (!wasInExam) {
+        sessionStorage.removeItem('student_exam_id');
+        examId = null;
+      }
+
+      loadStudentExams();
+
+      if (!examId) {
+        // Normal overview — sidebar + overview visible
+        document.getElementById('left-sidebar').classList.remove('hidden');
+        document.getElementById('overview-container').classList.remove('hidden');
+        document.getElementById('setup-view').classList.add('hidden');
+        document.getElementById('right-sidebar').classList.add('hidden');
+      } else {
+        // Mid-exam page refresh — restore setup view
+        document.getElementById('overview-container').classList.add('hidden');
+        document.getElementById('left-sidebar').classList.add('hidden');
+        document.getElementById('right-sidebar').classList.remove('hidden');
+        document.getElementById('setup-view').classList.remove('hidden');
+        updateStudentHeader();
+        // Re-send request on page refresh if already in setup
+        socket.on('connect', () => {
+          document.getElementById('step-access-status').textContent = 'Requesting proctor approval...';
+          socket.emit('student:request_access', {
+            examId,
+            studentId: user.id,
+            studentName: user.name
+          });
+        });
+      }
+    });
+
+    function returnToDashboard() {
+      sessionStorage.removeItem('student_exam_id');
+      sessionStorage.removeItem('eg_in_exam');
+      examId = null;
+      document.getElementById('left-sidebar').classList.remove('hidden');
+      document.getElementById('overview-container').classList.remove('hidden');
+      document.getElementById('setup-view').classList.add('hidden');
+      document.getElementById('right-sidebar').classList.add('hidden');
+      loadStudentExams();
+    }
+
+    function loadStudentExams() {
+      const history = JSON.parse(localStorage.getItem('eg_exam_history') || '[]');
+      const tbody = document.getElementById('student-exams-list');
+      
+      if (history.length === 0) {
+        tbody.innerHTML = '<tr id="empty-exams"><td colspan="4" class="text-center py-10 text-slate-600 text-sm">No examinations are currently assigned to you.</td></tr>';
+      } else {
+        tbody.innerHTML = '';
+        history.forEach(exam => {
+          const dur = exam.duration ? exam.duration + ' Minutes' : '90 Minutes';
+          const title = exam.title || 'Untitled Exam';
+          const id = exam.id || 'N/A';
+          const tr = document.createElement('tr');
+          tr.className = 'border-b border-white/5 hover:bg-slate-800/30 transition';
+          tr.innerHTML = `
+            <td class="px-6 py-4">
+              <div class="font-bold text-slate-200">${title}</div>
+              <div class="text-[10px] text-slate-500 mt-0.5">${id}</div>
+            </td>
+            <td class="px-6 py-4 text-slate-300">${dur}</td>
+            <td class="px-6 py-4"><span class="px-2 py-1 rounded bg-amber-500/10 text-amber-500 text-[10px] font-bold">Pending</span></td>
+            <td class="px-6 py-4 text-right">
+              <button onclick="startAssignedExam('${id}')" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition shadow-lg shadow-indigo-500/20">Begin Exam</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+      
+      // Update Dashboard Stats Counters
+      const stats = document.querySelectorAll('#stu-view-dashboard .text-3xl');
+      if (stats.length >= 3) {
+        stats[0].textContent = history.length;
+        stats[1].textContent = history.length; // assuming none are completed for now
+        stats[2].textContent = '0';
+      }
+    }
+
+    function startAssignedExam(id) {
+      if (!id) return;
+      sessionStorage.setItem('student_exam_id', id);
+      examId = id;
+      document.getElementById('overview-container').classList.add('hidden');
+      document.getElementById('left-sidebar').classList.add('hidden');
+      document.getElementById('right-sidebar').classList.remove('hidden');
+      document.getElementById('setup-view').classList.remove('hidden');
+      updateStudentHeader();
+
+      // Emit join request so admin sees it
+      document.getElementById('step-access-status').textContent = 'Requesting proctor approval...';
+      socket.emit('student:request_access', {
+        examId: id,
+        studentId: user.id,
+        studentName: user.name
+      });
+
+      // Ignite the AI Proctor Engine
+      if (typeof window.startCameraEngine === 'function') {
+        window.startCameraEngine();
+      }
+    }
+
+    // STUDENT TAB SWITCHING
+    function switchStudentTab(tabId, el) {
+      ['stu-view-dashboard', 'stu-view-exams', 'stu-view-upcoming', 'stu-view-results'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+      });
+      document.getElementById('stu-view-' + tabId).classList.remove('hidden');
+
+      if (el) {
+        document.querySelectorAll('#student-nav .stu-nav-link').forEach(link => {
+          link.classList.remove('bg-indigo-500/10', 'text-indigo-300', 'border-indigo-500/20');
+          link.classList.add('text-slate-400');
+        });
+        el.classList.remove('text-slate-400');
+        el.classList.add('bg-indigo-500/10', 'text-indigo-300', 'border', 'border-indigo-500/20');
+      }
+    }
+
+    function updateStudentHeader() { const el = document.getElementById('header-exam-id'); if (el) el.textContent = examId; }
+
+    const socket = io(window.location.origin);
+    socket.on('connect', () => { setNetStatus('CONNECTED', 'emerald'); });
+    socket.on('disconnect', () => { setNetStatus('DISCONNECTED', 'red'); });
+
+    function setNetStatus(text, color) {
+      const led = document.getElementById('net-led'); const status = document.getElementById('net-status');
+      const colorMap = { emerald: 'bg-emerald-500', red: 'bg-red-500', yellow: 'bg-amber-500' };
+      led.className = `w-2 h-2 rounded-full ${colorMap[color] || colorMap.yellow}`; status.textContent = `WSS:// ${text}`;
+    }
+
+    socket.on('admin:broadcast', (data) => {
+      if (data.studentId !== user.id && data.studentId !== 'all') return;
+      const banner = document.getElementById('admin-warning'); document.getElementById('warning-text').textContent = data.message;
+      banner.classList.remove('hidden'); logLocal(`PROCTOR: ${data.message}`, 'amber');
+      setTimeout(() => banner.classList.add('hidden'), 10000);
+    });
+
+    socket.on('student:terminated', (data) => {
+      if (data.studentId !== user.id) return;
+      examActive = false; clearInterval(timerInterval);
+      document.getElementById('test-view').classList.add('hidden'); document.getElementById('setup-view').classList.add('hidden');
+      document.getElementById('submit-view').classList.remove('hidden');
+      document.getElementById('score-summary').innerHTML = `<div class="text-red-400 font-bold mb-2">SESSION TERMINATED BY PROCTOR</div><div class="text-slate-400">Your exam has been forcefully closed.</div>`;
+    });
+
+    function renderQR(studentId) {
+      const qrContainer = document.getElementById('qr-container');
+      const mobileUrl = `${window.location.origin}/mobile.html?id=${studentId}&examId=${examId}`;
+      document.getElementById('mobile-url-text').textContent = mobileUrl; document.getElementById('mobile-url-text').classList.remove('hidden');
+      qrContainer.classList.remove('hidden'); qrContainer.innerHTML = '';
+      if (typeof QRCode !== 'undefined') { new QRCode(qrContainer, { text: mobileUrl, width: 120, height: 120, colorDark: "#1e293b", colorLight: "#ffffff" }); }
+      document.getElementById('step-mobile-status').textContent = 'Scan QR or open URL on your phone...';
+      markStep('step-mobile', 'pending'); markStep('step-mobile-num', 'pending');
+    }
+
+    socket.on('student:mobile_synced', () => {
+      mobileSynced = true; markStep('step-mobile', 'done'); markStep('step-mobile-num', 'done');
+      document.getElementById('step-mobile-status').textContent = 'Secondary camera linked!'; document.getElementById('qr-container').classList.add('hidden');
+      const btn = document.getElementById('start-btn'); btn.textContent = 'Begin Exam Session'; btn.disabled = false;
+      btn.className = 'w-full bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-lg shadow-emerald-500/30 text-white font-semibold rounded-xl py-3.5 transition-all text-sm mb-3';
+      btn.onclick = launchExam; document.getElementById('bypass-btn').classList.add('hidden'); logLocal('Mobile camera sync confirmed', 'emerald');
+    });
+
+    socket.on('student:access_granted', (res) => {
+      if (res.approved) {
+        accessGranted = true; markStep('step-access', 'done'); markStep('step-access-num', 'done');
+        document.getElementById('step-access-status').textContent = 'Admin approved.';
+        if (typeof startAudioMonitoring !== 'undefined') startAudioMonitoring();
+        renderQR(user.id); document.getElementById('bypass-btn').classList.remove('hidden'); logLocal('Access granted by proctor', 'emerald');
+      } else {
+        markStep('step-access', 'error'); document.getElementById('step-access-status').textContent = 'Access denied by admin.';
+        const btn = document.getElementById('start-btn'); btn.textContent = 'Access Denied'; btn.className = 'w-full bg-red-500/20 text-red-500 font-semibold rounded-xl py-3.5 transition-all text-sm mb-3';
+        logLocal('Access denied by proctor', 'red');
+      }
+    });
+
+    function bypassMobileAndStart() {
+      mobileSynced = true; markStep('step-mobile', 'done'); markStep('step-mobile-num', 'done');
+      document.getElementById('step-mobile-status').textContent = 'Demo mode: Bypassed'; document.getElementById('qr-container').classList.add('hidden');
+      launchExam();
+    }
+
+    function launchExam() {
+      sessionStorage.setItem('eg_in_exam', 'true'); // mark active exam for page-refresh recovery
+      socket.emit('student:join', { examId, studentId: user.id, studentName: user.name });
+      document.getElementById('setup-view').classList.add('hidden');
+      document.getElementById('test-view').classList.remove('hidden');
+      document.getElementById('setup-led').style.display = 'none';
+      document.getElementById('rec-dot').classList.remove('hidden');
+      document.getElementById('audio-dot').classList.remove('hidden');
+      document.getElementById('audio-label').classList.remove('hidden');
+      examActive = true; startTimer(); renderQuestion(); buildNavBar();
+      logLocal('Exam session started', 'emerald');
+    }
+
+    function markStep(id, state) {
+      const el = document.getElementById(id); if (!el) return;
+      if (id.endsWith('-num')) {
+        if (state === 'done') { el.className = 'w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center text-sm font-bold shrink-0'; el.textContent = '✓'; }
+        if (state === 'pending') { el.className = 'w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center text-sm font-bold shrink-0'; }
+        if (state === 'error') { el.className = 'w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center text-sm font-bold shrink-0'; }
+        return;
+      }
+      if (state === 'done') { el.classList.remove('border-white/5'); el.classList.add('border-emerald-500/30', 'bg-emerald-500/5'); }
+      if (state === 'pending') { el.classList.remove('border-white/5'); el.classList.add('border-amber-500/30', 'bg-amber-500/5'); }
+      if (state === 'error') { el.classList.remove('border-white/5'); el.classList.add('border-red-500/30', 'bg-red-500/5'); }
+    }
+
+    function startTimer() {
+      const el = document.getElementById('timer');
+      timerInterval = setInterval(() => {
+        if (timeLeft <= 0) { clearInterval(timerInterval); submitExam(); return; }
+        timeLeft--; const h = String(Math.floor(timeLeft / 3600)).padStart(2, '0'); const m = String(Math.floor((timeLeft % 3600) / 60)).padStart(2, '0'); const s = String(timeLeft % 60).padStart(2, '0');
+        el.textContent = `${h}:${m}:${s}`;
+        if (timeLeft < 300) { el.classList.remove('text-white'); el.classList.add('text-red-400', 'blink'); }
+      }, 1000);
+    }
+
+    function renderQuestion() {
+      const q = EXAM_QUESTIONS[currentQ];
+      document.getElementById('section-title').textContent = q.section; document.getElementById('question-title').textContent = q.title;
+      document.getElementById('question-text').textContent = q.text; document.getElementById('q-marks').textContent = q.marks;
+      document.getElementById('q-progress').textContent = `Q ${currentQ + 1}/${EXAM_QUESTIONS.length}`;
+
+      const opts = document.getElementById('options-container'); opts.innerHTML = '';
+      q.options.forEach((opt, i) => {
+        const isSelected = answers[currentQ] === i;
+        const btn = document.createElement('button');
+        btn.className = `option-btn w-full text-left px-5 py-4 rounded-xl text-sm font-medium ${isSelected ? 'selected' : 'bg-slate-900/50 text-slate-300'}`;
+        btn.innerHTML = `<span class="text-indigo-400 mr-3 font-bold">${String.fromCharCode(65 + i)}</span> ${opt}`;
+        btn.onclick = () => selectAnswer(i); opts.appendChild(btn);
+      });
+
+      document.getElementById('prev-btn').disabled = currentQ === 0;
+      const nextBtn = document.getElementById('next-btn');
+      if (currentQ === EXAM_QUESTIONS.length - 1) {
+        nextBtn.textContent = 'Submit Exam'; nextBtn.className = 'px-8 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-lg shadow-emerald-500/20 transition-all text-sm'; nextBtn.onclick = submitExam;
+      } else {
+        nextBtn.textContent = 'Next'; nextBtn.className = 'px-8 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium shadow-lg shadow-indigo-500/20 transition-all text-sm'; nextBtn.onclick = nextQuestion;
+      }
+      const flagBtn = document.getElementById('flag-btn');
+      flagBtn.className = flagged[currentQ] ? 'px-5 py-2.5 rounded-lg border border-amber-500 bg-amber-500/20 text-amber-500 font-medium transition-colors text-sm' : 'px-5 py-2.5 rounded-lg border border-amber-500/30 text-amber-500 hover:bg-amber-500/10 font-medium transition-colors text-sm';
+      updateNavBar();
+    }
+
+    function selectAnswer(optIdx) { answers[currentQ] = optIdx; renderQuestion(); logLocal(`Q${currentQ + 1}: Selected option ${String.fromCharCode(65 + optIdx)}`); }
+    function nextQuestion() { if (currentQ < EXAM_QUESTIONS.length - 1) { currentQ++; renderQuestion(); } }
+    function prevQuestion() { if (currentQ > 0) { currentQ--; renderQuestion(); } }
+    function flagQuestion() { flagged[currentQ] = !flagged[currentQ]; renderQuestion(); logLocal(`Q${currentQ + 1}: ${flagged[currentQ] ? 'Flagged' : 'Flag removed'}`); }
+
+    function buildNavBar() {
+      const nav = document.getElementById('q-nav'); nav.innerHTML = '';
+      EXAM_QUESTIONS.forEach((_, i) => {
+        const btn = document.createElement('button'); btn.id = `nav-q-${i}`; btn.className = 'w-9 h-9 rounded-lg font-semibold text-xs border border-white/10 text-slate-400 hover:border-indigo-400 transition-colors'; btn.textContent = i + 1;
+        btn.onclick = () => { currentQ = i; renderQuestion(); }; nav.appendChild(btn);
+      });
+    }
+
+    function updateNavBar() {
+      EXAM_QUESTIONS.forEach((_, i) => {
+        const btn = document.getElementById(`nav-q-${i}`); if (!btn) return;
+        if (i === currentQ) { btn.className = 'w-9 h-9 rounded-lg font-semibold text-xs bg-indigo-500/20 border border-indigo-500 text-indigo-400 transition-colors'; }
+        else if (flagged[i]) { btn.className = 'w-9 h-9 rounded-lg font-semibold text-xs bg-amber-500/10 border border-amber-500/50 text-amber-500 transition-colors'; }
+        else if (answers[i] !== null) { btn.className = 'w-9 h-9 rounded-lg font-semibold text-xs bg-emerald-500/10 border border-emerald-500/40 text-emerald-500 transition-colors'; }
+        else { btn.className = 'w-9 h-9 rounded-lg font-semibold text-xs border border-white/10 text-slate-400 hover:bg-white/5 transition-colors'; }
+      });
+    }
+
+    function submitExam() {
+      if (!examActive) return; examActive = false; clearInterval(timerInterval);
+      socket.emit('event:trigger', { event: 'exam_submitted', details: 'Student submitted exam' });
+      let correct = 0, incorrect = 0, skipped = 0;
+      answers.forEach((ans, i) => { if (ans === null) skipped++; else if (ans === EXAM_QUESTIONS[i].correct) correct++; else incorrect++; });
+      const score = correct * 4 - incorrect;
+      document.getElementById('test-view').classList.add('hidden'); document.getElementById('submit-view').classList.remove('hidden');
+      document.getElementById('score-summary').innerHTML = `
+        <div class="flex justify-between font-medium"><span>Correct</span><span class="text-emerald-400">${correct} / ${EXAM_QUESTIONS.length}</span></div>
+        <div class="flex justify-between font-medium"><span>Incorrect</span><span class="text-red-400">${incorrect}</span></div>
+        <div class="flex justify-between font-medium"><span>Skipped</span><span class="text-slate-500">${skipped}</span></div>
+        <div class="h-px bg-white/10 my-2"></div>
+        <div class="flex justify-between font-bold text-base"><span>Final Score</span><span class="text-indigo-400">${score} / ${EXAM_QUESTIONS.length * 4}</span></div>
+      `;
+    }
+
+    function logLocal(msg, color = 'slate') {
+      const colorMap = { slate: 'text-slate-500', emerald: 'text-emerald-400', amber: 'text-amber-400', red: 'text-red-400' };
+      const el = document.getElementById('local-log-entries'); const now = new Date().toLocaleTimeString();
+      el.insertAdjacentHTML('afterbegin', `<div class="${colorMap[color] || colorMap.slate}">[${now}] ${msg}</div>`);
+    }
+  </script>
+  <script src="js/proctor-engine.js"></script>
+</body>
+</html>
